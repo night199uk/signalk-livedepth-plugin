@@ -1,0 +1,56 @@
+{
+  "name": "signalk-livedepth-plugin",
+  "version": "0.2.0",
+  "description": "Serve a gridded bathymetry tile store built from the vessel's own position and depth, for a chart plotter's LiveDepth layer.",
+  "keywords": [
+    "signalk-node-server-plugin",
+    "signalk-category-chart-plotters",
+    "bathymetry",
+    "depth",
+    "sonar",
+    "sounder",
+    "marine"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "icon.svg"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsc -w",
+    "prepack": "npm run build",
+    "test": "vitest run",
+    "format": "prettier --write .",
+    "lint": "oxlint src test"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "@js-temporal/polyfill": "^0.5",
+    "@signalk/server-api": "^2.29.0",
+    "signalk-livedepth-tiles": "^0.2.1",
+    "stream-transform": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.1.0",
+    "oxlint": "^1.74.0",
+    "prettier": "^3.6.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  },
+  "signalk": {
+    "displayName": "LiveDepth",
+    "appIcon": "icon.svg"
+  }
+}
