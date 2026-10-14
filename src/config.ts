@@ -30,6 +30,11 @@ export function schema(app: ServerAPI) {
   const defaultPath = DepthPaths.find((path) =>
     app.getSelfPath(`environment.depth.${path}.value`),
   );
+  // A `default` is attached only when present: `default: undefined` survives in
+  // the object but is dropped when the server stores the schema as JSON, which
+  // its plugin schema check flags as data loss.
+  const fromBow = app.getSelfPath("sensors.depth.fromBow.value");
+  const fromCenter = app.getSelfPath("sensors.depth.fromCenter.value");
   return {
     type: "object",
     description:
@@ -46,7 +51,7 @@ export function schema(app: ServerAPI) {
           "Depth below transducer",
           "Depth below keel",
         ],
-        default: defaultPath,
+        ...(defaultPath === undefined ? {} : { default: defaultPath }),
       },
       sounder: {
         type: "object",
@@ -59,13 +64,13 @@ export function schema(app: ServerAPI) {
             type: "number",
             title: "Distance of the transducer from the bow (meters)",
             minimum: 0,
-            default: app.getSelfPath("sensors.depth.fromBow.value"),
+            ...(fromBow === undefined ? {} : { default: fromBow }),
           },
           x: {
             type: "number",
             title: "Distance of the transducer from the center (meters)",
             description: "+ve to starboard, -ve to port",
-            default: app.getSelfPath("sensors.depth.fromCenter.value"),
+            ...(fromCenter === undefined ? {} : { default: fromCenter }),
           },
         },
       },
