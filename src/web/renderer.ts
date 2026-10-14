@@ -93,6 +93,13 @@ async function loadSettings(): Promise<void> {
     settings = { ...DEFAULT_SETTINGS };
   }
   worker.postMessage({ type: "settings", settings });
+  // The live extension belongs to the tile source only; start or stop it as the
+  // source changes, so switching depth source takes effect.
+  if (settings.source === "tiles") {
+    startLive();
+  } else {
+    stopLive();
+  }
   schedule();
 }
 
@@ -343,7 +350,6 @@ await client.subscribe(["state.changed"], () => void loadSettings());
 await loadMeta();
 await loadSettings();
 await loadUnits();
-startLive();
 setInterval(() => {
   if (settings.enabled && settings.source === "history") schedule();
 }, POLL_MS);
