@@ -67,6 +67,13 @@ let dirty = false;
  * id and extent, even if a newer one arrives mid-render, so the host refuses a
  * stale frame as `superseded` rather than reading it as a size mismatch. */
 let rendering: RenderRequest | null = null;
+/** Whether the frame being rendered is a live (data-driven) one, sent without a
+ * request id and paced by the host's `liveInterval`. */
+let renderingLive = false;
+/** The host's least interval between two live frames, in ms. */
+let liveInterval = 200;
+/** When the last live frame was sent, to pace the next. */
+let lastLiveAt = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
 
 // Client-side mirror of the tile store, extended from the live stream.
@@ -213,7 +220,7 @@ function publish(): void {
   worker.postMessage({ type: "samples", samples });
   dirty = true;
   // A live frame for the last request, so the layer updates without a new one.
-  if (lastReq) void draw();
+  if (lastReq) draw(true);
 }
 
 // ******** live extension (tiles source) ********
@@ -274,10 +281,12 @@ function flushLive(): void {
 
 // ******** frame cycle ********
 
-async function draw(): Promise<void> {
+function draw(live = false): void {
   if (busy || !lastReq || !settings.enabled) return;
+  if (live && Date.now() - lastLiveAt < liveInterval) return;
   busy = true;
   rendering = lastReq;
+  renderingLive = live;
   dirty = false;
   worker.postMessage({ type: "render", req: rendering });
 }
@@ -285,30 +294,37 @@ async function draw(): Promise<void> {
 worker.onmessage = (e: MessageEvent<RenderWorkerOut>) => {
   const msg = e.data;
   const req = rendering;
+  const live = renderingLive;
   busy = false;
   rendering = null;
   if (msg.type !== "frame" || !req) {
     return;
   }
+  if (live) lastLiveAt = Date.now();
   // The host owns the image once it is transferred, and closes a refused one
-  // itself, so there is nothing to release here.
+  // itself, so there is nothing to release here. A live frame carries no
+  // request id, so the host paces it against `liveInterval`.
   void client.overlays
     .frame({
       overlayId: req.overlayId,
-      requestId: req.requestId,
+      requestId: live ? undefined : req.requestId,
       extent: req.extent,
       image: msg.image,
     })
     .catch(() => {});
   // A newer request arrived, or the data changed, while this frame rendered.
-  if (dirty || lastReq !== req) void draw();
+  if (dirty || lastReq !== req) draw(live);
 };
 
 // ******** bus wiring ********
 
 await client.subscribe(["overlay.request"], (_name, payload) => {
-  lastReq = payload as OverlayRequestEvent;
-  void draw();
+  const req = payload as OverlayRequestEvent;
+  lastReq = req;
+  if (typeof req.liveInterval === "number" && req.liveInterval > 0) {
+    liveInterval = req.liveInterval;
+  }
+  draw();
 });
 
 await client.subscribe(["overlay.state"], (_name, payload) => {

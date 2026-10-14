@@ -83,6 +83,13 @@ export function buildManifest(version = pluginVersion()): PlotterExtManifest {
         visible: true,
         opacity: 0.85,
         minZoom: 4,
+        // The Chart list's "Layer settings" button opens this panel, so the
+        // layer's settings sit with the layer, not only behind the toolbar
+        // button.
+        configPanel: "livedepth-settings",
+        // Isobaths and labels want the pixels; the host still clamps to its own
+        // memory budget.
+        preferredPixelRatio: 2,
       },
     ],
   };

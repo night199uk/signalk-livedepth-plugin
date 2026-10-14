@@ -52,6 +52,20 @@ test("the toolbar button opens a panel declared here", () => {
   expect(panels[0].url.startsWith(ASSET_BASE)).toBe(true);
 });
 
+test("the overlay points at a declared settings panel and a pixel density", () => {
+  const m = buildManifest();
+  const overlays = m.overlays as {
+    configPanel?: string;
+    preferredPixelRatio?: number;
+  }[];
+  const panels = m.panels as { id: string }[];
+  // A configPanel naming a panel here gives the layer a "Layer settings"
+  // button on its Chart-list row; one the host can't resolve is ignored.
+  expect(overlays[0].configPanel).toBe("livedepth-settings");
+  expect(panels.some((p) => p.id === overlays[0].configPanel)).toBe(true);
+  expect(overlays[0].preferredPixelRatio).toBeGreaterThan(0);
+});
+
 test("PLUGIN_ID names the extension resource key", () => {
   expect(PLUGIN_ID).toBe("signalk-livedepth-plugin");
 });

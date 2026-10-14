@@ -20,6 +20,8 @@ export interface RenderRequest {
   zoom: number;
   /** Radians clockwise; advisory, for keeping labels upright. */
   rotation: number;
+  /** Least time (ms) the host accepts between two live (unrequested) frames. */
+  liveInterval?: number;
 }
 
 export type RenderWorkerIn =

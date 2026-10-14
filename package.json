@@ -51,12 +51,20 @@
     "express": "^5.1.0",
     "oxlint": "^1.74.0",
     "prettier": "^3.6.2",
-    "signalk-plotterext-bus": "^0.19.0",
+    "signalk-plotterext-bus": "^0.20.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"
   },
   "signalk": {
     "displayName": "LiveDepth",
-    "appIcon": "icon.svg"
+    "appIcon": "icon.svg",
+    "appstore": {
+      "displayName": "LiveDepth",
+      "categories": [
+        "chart-plotters"
+      ],
+      "author": "night199uk",
+      "description": "Build a gridded bathymetry tile store from the vessel's own depth, and draw it as a live depth layer on a plotter-extensions chartplotter such as Freeboard-SK."
+    }
   }
 }
