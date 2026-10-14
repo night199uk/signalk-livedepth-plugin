@@ -43,7 +43,7 @@ export function buildManifest(version = pluginVersion()): PlotterExtManifest {
   return {
     name: "LiveDepth",
     description:
-      "Draw the vessel's recorded depth as a live bathymetric layer on the chart, shaded with isobaths.",
+      "Draw your recorded depth as a live depth map on the chart, shaded with depth contours.",
     version,
     apiVersion: "1",
     requires: ["background.iframe", "overlays.image", "signalk.stream"],

@@ -1,7 +1,7 @@
 {
   "name": "signalk-livedepth-plugin",
   "version": "0.2.1",
-  "description": "Gridded bathymetry tile store and LiveDepth chart layer for Signal K chartplotters.",
+  "description": "Build and visualise a depth map from your own soundings, live on the chart as your vessel moves.",
   "keywords": [
     "signalk-node-server-plugin",
     "signalk-category-chart-plotters",
@@ -64,7 +64,7 @@
         "chart-plotters"
       ],
       "author": "night199uk",
-      "description": "Build a gridded bathymetry tile store from the vessel's own depth, and draw it as a live depth layer on a plotter-extensions chartplotter such as Freeboard-SK."
+      "description": "Build and visualise a depth map from your own soundings, live on the chart as your vessel moves. Works in Freeboard-SK and other plotter-extensions chartplotters."
     }
   }
 }
