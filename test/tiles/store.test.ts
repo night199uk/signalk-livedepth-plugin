@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { BASE_ZOOM, TILE_SIZE } from "signalk-livedepth-tiles";
+import { BASE_ZOOM, TILE_SIZE } from "../../src/tiles/core/index.js";
 import { createTileDB, createTileStore } from "../../src/tiles/store.js";
 
 const tile = (x: number, y: number) => ({ x, y });

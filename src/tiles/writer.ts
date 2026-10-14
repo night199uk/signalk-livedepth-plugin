@@ -1,10 +1,6 @@
 import { Writable } from "stream";
 import { BathymetryData } from "../types.js";
-import {
-  BASE_ZOOM,
-  TileStore,
-  createTileAccumulator,
-} from "signalk-livedepth-tiles";
+import { BASE_ZOOM, TileStore, createTileAccumulator } from "./core/index.js";
 
 /** How long soundings are batched before being written to the store. */
 export const DEFAULT_FLUSH_MS = 1000;

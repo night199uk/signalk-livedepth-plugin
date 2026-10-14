@@ -1,6 +1,6 @@
 import { Context, Delta, Path, ServerAPI } from "@signalk/server-api";
 import { PassThrough } from "stream";
-import { correctToTransducer, TransducerOffset } from "signalk-livedepth-tiles";
+import { correctToTransducer, TransducerOffset } from "../tiles/core/index.js";
 import { Config } from "../config.js";
 import { Temporal } from "@js-temporal/polyfill";
 import { BathymetryData } from "../types.js";

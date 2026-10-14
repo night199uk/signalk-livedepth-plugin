@@ -1,7 +1,7 @@
 import { transform } from "stream-transform";
 import { Writable } from "stream";
 import { ServerAPI } from "@signalk/server-api";
-import { TransducerOffset } from "signalk-livedepth-tiles";
+import { TransducerOffset } from "./tiles/core/index.js";
 import { Config } from "./config.js";
 import { createLiveStream, toPrecision } from "./streams/index.js";
 

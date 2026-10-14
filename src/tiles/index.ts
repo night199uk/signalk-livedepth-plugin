@@ -1,4 +1,4 @@
-export * from "signalk-livedepth-tiles";
+export * from "./core/index.js";
 export * from "./store.js";
 export * from "./writer.js";
 export * from "./seed.js";

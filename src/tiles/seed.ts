@@ -14,7 +14,7 @@ import {
   correctToTransducer,
   createTileAccumulator,
   rebuildAncestors,
-} from "signalk-livedepth-tiles";
+} from "./core/index.js";
 
 /** Highest granularity we ask the History API for, in seconds. */
 export const DEFAULT_SEED_RESOLUTION = 0.1;

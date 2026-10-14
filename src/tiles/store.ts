@@ -7,7 +7,7 @@ import {
   encodeTile,
   mergeCell,
   minPoolTile,
-} from "signalk-livedepth-tiles";
+} from "./core/index.js";
 
 /**
  * The derived, gridded store the chart reads from. It sits beside the raw

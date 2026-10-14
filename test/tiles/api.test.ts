@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import type { PluginRouter } from "@signalk/server-api";
+import type { ServerAPI } from "@signalk/server-api";
 import {
   BASE_ZOOM,
   RECORD_BYTES,
@@ -9,8 +9,11 @@ import {
   lngLatToCell,
   mergeCell,
   type TileCells,
-} from "signalk-livedepth-tiles";
-import { registerBathymetryRoutes } from "../../src/tiles/api.js";
+} from "../../src/tiles/core/index.js";
+import {
+  BATHYMETRY_BASE,
+  registerBathymetryRoutes,
+} from "../../src/tiles/api.js";
 
 interface Res {
   set(key: string, value: string): Res;
@@ -20,24 +23,22 @@ interface Res {
   send(body: unknown): Res;
 }
 
-function captureRoutes() {
+/** Capture the top-level routes `registerBathymetryRoutes` registers on the
+ * Express-capable server API. */
+function captureApp() {
   const handlers = new Map<
     string,
     (req: { params: Record<string, string> }, res: Res) => void
   >();
-  const router = {
-    access() {
-      return router;
-    },
+  const app = {
     get(
       path: string,
       handler: (req: { params: Record<string, string> }, res: Res) => void,
     ) {
       handlers.set(path, handler);
-      return router;
     },
-  } as unknown as PluginRouter;
-  return { router, handlers };
+  } as unknown as ServerAPI;
+  return { app, handlers };
 }
 
 test("serves a tile as raw bytes, not JSON", () => {
@@ -47,9 +48,9 @@ test("serves a tile as raw bytes, not JSON", () => {
   mergeCell(cells, cy * TILE_SIZE + cx, encodeDepth(5));
   store.write(BASE_ZOOM, x, y, cells);
 
-  const { router, handlers } = captureRoutes();
-  registerBathymetryRoutes(router, () => store);
-  const handler = handlers.get("/bathymetry/tiles/:z/:x/:y");
+  const { app, handlers } = captureApp();
+  registerBathymetryRoutes(app, () => store);
+  const handler = handlers.get(`${BATHYMETRY_BASE}/tiles/:z/:x/:y`);
   expect(handler).toBeDefined();
 
   let body: unknown;

@@ -1,15 +1,17 @@
 import { ServerAPI, Plugin, PluginRouter } from "@signalk/server-api";
 import { join } from "path";
-import { TransducerOffset, TileStore } from "signalk-livedepth-tiles";
+import { TransducerOffset, TileStore } from "./tiles/core/index.js";
 import { schema, Config } from "./config.js";
 import { createTileDB, createTileStore } from "./tiles/store.js";
 import { createTileWriter } from "./tiles/writer.js";
 import { seedFromHistory } from "./tiles/seed.js";
 import {
   registerBathymetryRoutes,
+  registerSeedRoutes,
   SeedHandle,
   SeedStatus,
 } from "./tiles/api.js";
+import { registerPlotterExtension } from "./plotterext/provider.js";
 import { createCollector } from "./collector.js";
 
 /** The vessel's length overall, for locating the reference point the server
@@ -86,6 +88,8 @@ export default function createPlugin(app: ServerAPI): Plugin {
   let config: Config | undefined;
   let transducer: TransducerOffset | undefined;
   let seedStatus: SeedStatus = { running: false };
+  let running = false;
+  let routesRegistered = false;
 
   const runSeed = async (resolution?: number): Promise<void> => {
     if (seedStatus.running) return;
@@ -147,6 +151,22 @@ export default function createPlugin(app: ServerAPI): Plugin {
       });
       app.setPluginStatus("Collecting depth into the bathymetry tile store");
 
+      running = true;
+      // Offer the chart layer to a host chartplotter, and serve the store the
+      // layer reads from a top-level, non-admin route.
+      registerPlotterExtension(app, () => running);
+      if (!routesRegistered) {
+        registerBathymetryRoutes(
+          app,
+          () => tileStore,
+          () => ({
+            depthPath: config ? `environment.depth.${config.path}` : undefined,
+            transducer,
+          }),
+        );
+        routesRegistered = true;
+      }
+
       if (startConfig.seed?.run) {
         // One-time rebuild. Clear the trigger when it finishes (or fails) so it
         // doesn't fire again on the next start; an interrupted run resumes from
@@ -161,6 +181,7 @@ export default function createPlugin(app: ServerAPI): Plugin {
     },
 
     stop() {
+      running = false;
       abortController?.abort("Stopping signalk-livedepth-plugin");
       tileStore?.close();
       tileStore = undefined;
@@ -171,15 +192,9 @@ export default function createPlugin(app: ServerAPI): Plugin {
     },
 
     registerWithRouter(router: PluginRouter) {
-      registerBathymetryRoutes(
-        router,
-        () => tileStore,
-        () => ({
-          depthPath: config ? `environment.depth.${config.path}` : undefined,
-          transducer,
-        }),
-        seed,
-      );
+      // The one-time seed trigger stays admin-only, on the plugin's own router;
+      // the store the extension reads is served from the top-level route above.
+      registerSeedRoutes(router, seed);
     },
   };
 }

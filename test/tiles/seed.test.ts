@@ -9,7 +9,7 @@ import {
   correctToTransducer,
   createTileAccumulator,
   lngLatToCell,
-} from "signalk-livedepth-tiles";
+} from "../../src/tiles/core/index.js";
 import { createTileDB, createTileStore } from "../../src/tiles/store.js";
 import { SEED_CURSOR_KEY, seedFromHistory } from "../../src/tiles/seed.js";
 
