@@ -28,7 +28,8 @@
   "files": [
     "dist",
     "public",
-    "icon.svg"
+    "icon.svg",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "npm run build:plugin && npm run typecheck:web && npm run build:web",
