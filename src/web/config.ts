@@ -1,7 +1,12 @@
 // The LiveDepth settings panel: a keepAlive iframe the host opens from the
-// LiveDepth toolbar button. It edits the extension's state, which the host
-// persists and rebroadcasts (`state.changed`), so the runtime picks changes up
-// without a direct connection between the two contexts.
+// LiveDepth toolbar button or the layer's "Layer settings" row. It edits the
+// extension's state, which the host persists and rebroadcasts (`state.changed`),
+// so the runtime picks changes up without a direct connection between the two
+// contexts.
+//
+// Depth-valued settings are shown in the user's preferred depth unit
+// (`units.get`) and stored in metres; the history-only settings are greyed while
+// the depth source is the plugin's tiles.
 
 import { connectExtension } from "signalk-plotterext-bus/extension";
 import {
@@ -12,8 +17,12 @@ import {
   type LiveDepthSettings,
 } from "./shared/settings.js";
 
+/** Metres in a foot. */
+const METRES_PER_FOOT = 0.3048;
+
 const client = await connectExtension();
 let settings: LiveDepthSettings = { ...DEFAULT_SETTINGS };
+let depthUnit: "m" | "foot" = "m";
 
 const root = document.getElementById("root")!;
 
@@ -21,30 +30,47 @@ interface Field {
   key: keyof LiveDepthSettings;
   label: string;
   hint?: string;
+  /** A unit shown after the input. */
+  suffix?: string;
+  /** Shown in the user's depth unit, stored in metres. */
+  depth?: boolean;
+  /** Only meaningful for the History source; greyed while the source is tiles. */
+  historyOnly?: boolean;
 }
 
-const NUMBER_FIELDS: Field[] = [
+const FIELDS: Field[] = [
   {
     key: "historyWindowHours",
     label: "History window",
-    hint: "How far back to fetch depth, in hours.",
+    hint: "How far back to fetch depth.",
+    suffix: "h",
+    historyOnly: true,
   },
   {
     key: "historyResolutionS",
     label: "Sample interval",
-    hint: "Seconds between depth samples.",
+    hint: "Seconds between depth samples; smaller is finer.",
+    suffix: "s",
+    historyOnly: true,
   },
   {
     key: "shadeLimitMetres",
     label: "Shade limit",
-    hint: "Depth the shading runs to, in metres; deeper is left to the chart.",
+    hint: "Depth the shading runs to; deeper is left to the chart.",
+    depth: true,
   },
   {
     key: "contourIntervalMetres",
     label: "Isobath interval",
-    hint: "Metres between isobaths.",
+    hint: "Depth between isobaths.",
+    depth: true,
   },
-  { key: "cellPx", label: "Grid cell", hint: "Circle diameter, in pixels." },
+  {
+    key: "cellPx",
+    label: "Grid cell",
+    hint: "Circle diameter, in screen pixels.",
+    suffix: "px",
+  },
   {
     key: "mergeTolerance",
     label: "Merge band",
@@ -54,46 +80,92 @@ const NUMBER_FIELDS: Field[] = [
     key: "maxDepthMetres",
     label: "Max depth",
     hint: "Samples deeper than this are not drawn.",
+    depth: true,
   },
   {
     key: "safetyDepthMetres",
     label: "Safety depth",
     hint: "Samples at or below this depth are marked individually.",
+    depth: true,
   },
 ];
 
+const unitSymbol = () => (depthUnit === "foot" ? "ft" : "m");
+const toDisplay = (metres: number) =>
+  depthUnit === "foot" ? metres / METRES_PER_FOOT : metres;
+const fromDisplay = (value: number) =>
+  depthUnit === "foot" ? value * METRES_PER_FOOT : value;
+const round = (v: number) => Math.round(v * 100) / 100;
+
+const historyRows: HTMLElement[] = [];
+const historyInputs: HTMLInputElement[] = [];
+
+/** Grey the history-only fields while the source is the plugin's tiles. */
+function syncHistoryDisabled(): void {
+  const disabled = settings.source === "tiles";
+  for (const input of historyInputs) {
+    input.disabled = disabled;
+  }
+  for (const row of historyRows) {
+    row.classList.toggle("disabled", disabled);
+  }
+}
+
 function numberField(field: Field): HTMLElement {
   const bounds = SETTINGS_BOUNDS[field.key]!;
+  const lo = field.depth ? round(toDisplay(bounds.min)) : bounds.min;
+  const hi = field.depth ? round(toDisplay(bounds.max)) : bounds.max;
+  const step = field.depth ? round(toDisplay(bounds.step)) : bounds.step;
+
   const wrap = document.createElement("label");
   wrap.className = "field";
-  wrap.innerHTML = `<span class="name">${field.label}</span>`;
+  const name = document.createElement("span");
+  name.className = "name";
+  name.textContent = field.label;
+  wrap.appendChild(name);
+
+  const control = document.createElement("span");
+  control.className = "control";
   const input = document.createElement("input");
   input.type = "number";
-  input.min = `${bounds.min}`;
-  input.max = `${bounds.max}`;
-  input.step = `${bounds.step}`;
-  input.value = `${settings[field.key]}`;
+  input.min = `${lo}`;
+  input.max = `${hi}`;
+  input.step = `${step}`;
+  const stored = settings[field.key] as number;
+  input.value = `${round(field.depth ? toDisplay(stored) : stored)}`;
   input.addEventListener("change", () => {
-    const clamped = Math.min(
-      bounds.max,
-      Math.max(bounds.min, Number(input.value)),
-    );
-    input.value = `${clamped}`;
-    (settings[field.key] as number) = clamped;
+    const clamped = Math.min(hi, Math.max(lo, Number(input.value)));
+    input.value = `${round(clamped)}`;
+    (settings[field.key] as number) = field.depth
+      ? fromDisplay(clamped)
+      : clamped;
     void save();
   });
-  wrap.appendChild(input);
+  control.appendChild(input);
+  const suffix = document.createElement("span");
+  suffix.className = "suffix";
+  suffix.textContent = field.depth ? unitSymbol() : (field.suffix ?? "");
+  control.appendChild(suffix);
+  wrap.appendChild(control);
+
   if (field.hint) {
     const hint = document.createElement("span");
     hint.className = "hint";
     hint.textContent = field.hint;
     wrap.appendChild(hint);
   }
+
+  if (field.historyOnly) {
+    historyRows.push(wrap);
+    historyInputs.push(input);
+  }
   return wrap;
 }
 
 function build(): void {
   root.replaceChildren();
+  historyRows.length = 0;
+  historyInputs.length = 0;
 
   const heading = document.createElement("h2");
   heading.textContent = "LiveDepth";
@@ -101,7 +173,9 @@ function build(): void {
 
   const enabled = document.createElement("label");
   enabled.className = "field row";
-  enabled.innerHTML = `<span class="name">Show the layer</span>`;
+  const enabledName = document.createElement("span");
+  enabledName.className = "name";
+  enabledName.textContent = "Show the layer";
   const enabledInput = document.createElement("input");
   enabledInput.type = "checkbox";
   enabledInput.checked = settings.enabled;
@@ -109,12 +183,14 @@ function build(): void {
     settings.enabled = enabledInput.checked;
     void save();
   });
-  enabled.appendChild(enabledInput);
+  enabled.append(enabledName, enabledInput);
   root.appendChild(enabled);
 
   const source = document.createElement("label");
   source.className = "field";
-  source.innerHTML = `<span class="name">Depth source</span>`;
+  const sourceName = document.createElement("span");
+  sourceName.className = "name";
+  sourceName.textContent = "Depth source";
   const select = document.createElement("select");
   for (const [value, label] of [
     ["history", "History (this vessel's track)"],
@@ -128,9 +204,10 @@ function build(): void {
   }
   select.addEventListener("change", () => {
     settings.source = select.value as DepthSource;
+    syncHistoryDisabled();
     void save();
   });
-  source.appendChild(select);
+  source.append(sourceName, select);
   const sourceHint = document.createElement("span");
   sourceHint.className = "hint";
   sourceHint.textContent =
@@ -139,9 +216,10 @@ function build(): void {
   source.appendChild(sourceHint);
   root.appendChild(source);
 
-  for (const field of NUMBER_FIELDS) {
+  for (const field of FIELDS) {
     root.appendChild(numberField(field));
   }
+  syncHistoryDisabled();
 }
 
 async function save(): Promise<void> {
@@ -156,8 +234,15 @@ async function load(): Promise<void> {
   } catch {
     settings = { ...DEFAULT_SETTINGS };
   }
+  try {
+    const res = (await client.call("units.get")) as {
+      units?: { depth?: string };
+    };
+    depthUnit = res?.units?.depth === "foot" ? "foot" : "m";
+  } catch {
+    depthUnit = "m";
+  }
   build();
 }
 
 await load();
-client.subscribe(["state.changed"], () => void load());

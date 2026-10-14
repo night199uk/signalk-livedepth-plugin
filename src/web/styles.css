@@ -67,6 +67,27 @@ h2 {
   font-size: 12px;
 }
 
+.field .control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.field .control input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.field .suffix {
+  color: var(--muted);
+  min-width: 1.5em;
+}
+
+/* A setting that has no effect for the current depth source. */
+.field.disabled {
+  opacity: 0.5;
+}
+
 input[type="number"],
 select {
   width: 100%;
