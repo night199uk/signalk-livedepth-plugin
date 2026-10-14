@@ -12,6 +12,11 @@
     "marine"
   ],
   "license": "MIT",
+  "author": "night199uk",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/night199uk/signalk-livedepth-plugin.git"
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -34,6 +39,7 @@
     "prepack": "npm run build",
     "test": "vitest run",
     "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "lint": "oxlint src test"
   },
   "engines": {
