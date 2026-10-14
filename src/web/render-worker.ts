@@ -54,6 +54,15 @@ let samples: DepthSample[] = [];
 let settings: LiveDepthSettings | null = null;
 let field: DepthField | null = null;
 let fieldDirty = true;
+/** The user's preferred depth unit (`"m"` or `"foot"`), for the labels. */
+let depthUnit = "m";
+
+/** A depth in the user's unit, to one decimal place. */
+function formatDepth(metres: number): string {
+  return depthUnit === "foot"
+    ? (metres / 0.3048).toFixed(1)
+    : metres.toFixed(1);
+}
 
 // ******** WebGL ********
 
@@ -361,7 +370,7 @@ function drawOverlay(
         LABEL_FONT_MIN,
         Math.min(LABEL_FONT_MAX, (zoom - 8) * 1.5 + LABEL_FONT_MIN),
       );
-      label(c.depth.toFixed(1), p, fontCss);
+      label(formatDepth(c.depth), p, fontCss);
     }
   }
 }
@@ -418,6 +427,9 @@ self.onmessage = (e: MessageEvent<RenderWorkerIn>) => {
     case "settings":
       settings = msg.settings;
       fieldDirty = true;
+      break;
+    case "units":
+      depthUnit = msg.depth;
       break;
     case "render":
       render(msg.req);

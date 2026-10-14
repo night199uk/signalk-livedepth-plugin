@@ -113,6 +113,20 @@ function correct(
     : { lon, lat };
 }
 
+/** Ask the host for the user's preferred depth unit, for the labels. */
+async function loadUnits(): Promise<void> {
+  try {
+    const res = (await client.call("units.get")) as {
+      units?: { depth?: string };
+    };
+    if (res?.units?.depth) {
+      worker.postMessage({ type: "units", depth: res.units.depth });
+    }
+  } catch {
+    // No units capability: the labels stay in metres.
+  }
+}
+
 async function fetchHistory(): Promise<void> {
   const windowMs = settings.historyWindowHours * 3600000;
   const to = Date.now();
@@ -302,6 +316,7 @@ await client.subscribe(["state.changed"], () => void loadSettings());
 
 await loadMeta();
 await loadSettings();
+await loadUnits();
 startLive();
 setInterval(() => {
   if (settings.enabled && settings.source === "history") schedule();

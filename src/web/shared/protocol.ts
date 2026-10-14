@@ -25,6 +25,8 @@ export interface RenderRequest {
 export type RenderWorkerIn =
   | { type: "samples"; samples: DepthSample[] }
   | { type: "settings"; settings: LiveDepthSettings }
+  /** The user's preferred depth unit (`"m"` or `"foot"`), for the labels. */
+  | { type: "units"; depth: string }
   | { type: "render"; req: RenderRequest }
   | { type: "release" };
 
