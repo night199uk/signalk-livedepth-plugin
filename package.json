@@ -1,6 +1,6 @@
 {
   "name": "signalk-livedepth-plugin",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Serve a gridded bathymetry tile store built from the vessel's own position and depth, for a chart plotter's LiveDepth layer.",
   "keywords": [
     "signalk-node-server-plugin",
