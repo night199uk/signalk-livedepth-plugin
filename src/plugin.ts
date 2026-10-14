@@ -13,14 +13,23 @@ import {
 import { createCollector } from "./collector.js";
 
 /** The vessel's length overall, for locating the reference point the server
- * reports (the CCRP is midships). Handles `getSelfPath` returning either the
- * value or its node. */
-function readLengthOverall(app: ServerAPI): number | undefined {
-  const node = app.getSelfPath("design.length.overall") as
-    number | { value?: number } | undefined;
+ * reports (the CCRP is midships).
+ *
+ * `design.length` is a compound-value node — `{ value: { overall, hull,
+ * waterline } }` — not a leaf, and `getSelfPath` is a `lodash.get` over the raw
+ * self model, so `design.length.overall` resolves to nothing. Read the node and
+ * take `.value.overall` (matching how the server's own GNSS corrector reads it).
+ * Handles `getSelfPath` returning either the value or its node. */
+export function readLengthOverall(app: ServerAPI): number | undefined {
+  const node = app.getSelfPath("design.length") as
+    number | { value?: number | { overall?: number } } | undefined;
   const value = typeof node === "number" ? node : node?.value;
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
+  const overall =
+    typeof value === "number"
+      ? value
+      : (value as { overall?: number } | undefined)?.overall;
+  return typeof overall === "number" && Number.isFinite(overall) && overall > 0
+    ? overall
     : undefined;
 }
 
