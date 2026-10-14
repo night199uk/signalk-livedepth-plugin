@@ -95,10 +95,15 @@ export function registerBathymetryRoutes(
         res.status(404).end();
         return;
       }
+      // Send a Buffer, not the Uint8Array `encodeTile` returns: express's
+      // `res.send` JSON-encodes anything that isn't a Buffer or string (it
+      // becomes `{"0":…,"1":…}`), so the client would decode the JSON text as
+      // sparse records. `Buffer` is a Uint8Array subclass, so it sends the
+      // bytes verbatim.
       res
         .set("Content-Type", "application/octet-stream")
         .set("Cache-Control", "no-cache")
-        .send(encodeTile(cells));
+        .send(Buffer.from(encodeTile(cells)));
     });
 
   if (seed) {
