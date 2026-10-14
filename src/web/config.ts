@@ -111,11 +111,29 @@ function syncHistoryDisabled(): void {
   }
 }
 
+/** The bounds a field is shown and clamped with, in the unit it is shown in.
+ * A depth setting is stored in metres but read in the user's unit; converting
+ * the metre bounds outright gives awkward values in feet (0.5 m = 1.64 ft), so
+ * a typed whole foot would be snapped away. In feet the bounds are whole
+ * numbers and the step is one; in metres they are used as-is. */
+function displayBounds(field: Field): {
+  min: number;
+  max: number;
+  step: number;
+} {
+  const b = SETTINGS_BOUNDS[field.key]!;
+  if (!field.depth || depthUnit !== "foot") {
+    return b;
+  }
+  return {
+    min: Math.floor(toDisplay(b.min)),
+    max: Math.round(toDisplay(b.max)),
+    step: 1,
+  };
+}
+
 function numberField(field: Field): HTMLElement {
-  const bounds = SETTINGS_BOUNDS[field.key]!;
-  const lo = field.depth ? round(toDisplay(bounds.min)) : bounds.min;
-  const hi = field.depth ? round(toDisplay(bounds.max)) : bounds.max;
-  const step = field.depth ? round(toDisplay(bounds.step)) : bounds.step;
+  const { min: lo, max: hi, step } = displayBounds(field);
 
   const wrap = document.createElement("label");
   wrap.className = "field";

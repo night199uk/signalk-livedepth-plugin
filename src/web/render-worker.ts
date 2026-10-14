@@ -57,10 +57,10 @@ let fieldDirty = true;
 /** The user's preferred depth unit (`"m"` or `"foot"`), for the labels. */
 let depthUnit = "m";
 
-/** A depth in the user's unit, to one decimal place. */
+/** A depth in the user's unit: whole feet, or a tenth of a metre. */
 function formatDepth(metres: number): string {
   return depthUnit === "foot"
-    ? (metres / 0.3048).toFixed(1)
+    ? (metres / 0.3048).toFixed(0)
     : metres.toFixed(1);
 }
 
