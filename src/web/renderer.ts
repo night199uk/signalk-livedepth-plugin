@@ -63,6 +63,10 @@ let samples: DepthSample[] = [];
 let lastReq: RenderRequest | null = null;
 let busy = false;
 let dirty = false;
+/** The request currently being rendered. Its frame carries this request's own
+ * id and extent, even if a newer one arrives mid-render, so the host refuses a
+ * stale frame as `superseded` rather than reading it as a size mismatch. */
+let rendering: RenderRequest | null = null;
 let timer: ReturnType<typeof setTimeout> | undefined;
 
 // Client-side mirror of the tile store, extended from the live stream.
@@ -273,16 +277,21 @@ function flushLive(): void {
 async function draw(): Promise<void> {
   if (busy || !lastReq || !settings.enabled) return;
   busy = true;
-  const req = lastReq;
+  rendering = lastReq;
   dirty = false;
-  worker.postMessage({ type: "render", req });
+  worker.postMessage({ type: "render", req: rendering });
 }
 
 worker.onmessage = (e: MessageEvent<RenderWorkerOut>) => {
   const msg = e.data;
+  const req = rendering;
   busy = false;
-  if (msg.type !== "frame" || !lastReq) return;
-  const req = lastReq;
+  rendering = null;
+  if (msg.type !== "frame" || !req) {
+    return;
+  }
+  // The host owns the image once it is transferred, and closes a refused one
+  // itself, so there is nothing to release here.
   void client.overlays
     .frame({
       overlayId: req.overlayId,
@@ -290,8 +299,9 @@ worker.onmessage = (e: MessageEvent<RenderWorkerOut>) => {
       extent: req.extent,
       image: msg.image,
     })
-    .catch(() => msg.image.close());
-  if (dirty) void draw();
+    .catch(() => {});
+  // A newer request arrived, or the data changed, while this frame rendered.
+  if (dirty || lastReq !== req) void draw();
 };
 
 // ******** bus wiring ********
