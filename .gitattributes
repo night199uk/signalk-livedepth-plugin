@@ -1,0 +1,3 @@
+# Keep line endings LF on every platform, including Windows checkouts, so the
+# formatting check (prettier, endOfLine: lf) is consistent across the CI matrix.
+* text=auto eol=lf
