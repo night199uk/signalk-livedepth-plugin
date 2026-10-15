@@ -4,16 +4,18 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-10-15
 
 The LiveDepth chart layer, and the merge that brings everything into one
-package.
+package. The chart layer needs a host that implements `overlays.image` —
+Freeboard-SK **3.4.0-beta.0 or later**.
 
 ### Added
 
 - The **LiveDepth chart layer**: an image map overlay offered to
-  plotter-extensions chartplotters (Freeboard-SK 3.4.0 or later), drawn by a
-  headless background runtime that shades the depth surface, draws isobaths and
+  plotter-extensions chartplotters (Freeboard-SK 3.4.0-beta.0 or later), drawn
+  by a headless background runtime that shades the depth surface, draws isobaths
+  and
   labels the shoals. It appears in the chartplotter's Chart list with show/hide
   and opacity controls, and its settings open from the layer's row or the
   LiveDepth toolbar button.

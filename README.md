@@ -23,8 +23,9 @@ already covered is there to look at the next time you're in the area.
 ## What you need
 
 - A Signal K server with your depth sounder and GPS feeding it.
-- A chartplotter that supports plotter extensions — Freeboard-SK 3.4.0 or later,
-  or another host that supports the `overlays.image` capability.
+- A chartplotter that supports plotter extensions — **Freeboard-SK
+  3.4.0-beta.0 or later**, or another host that supports the `overlays.image`
+  capability.
 - The plugin enabled on the server (install it from the App Store, then switch it
   on in the server's plugin settings).
 
