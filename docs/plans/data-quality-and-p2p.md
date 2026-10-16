@@ -111,11 +111,23 @@ is a few bits at most, against the two bytes a raw pair on every point would cos
 belowTransducer = belowSurface − transducerOffset
 belowKeel       = belowSurface − draft
 chartDatum      = belowSurface − tide
+ellipsoidDepth  = waterSurfaceHAE − belowSurface
 ```
 
 The first two are pure geometry and exact for the profile in force. The third is
 the only one that depends on knowing the tide, and is the difference between
 CATZOC C/D and something better.
+
+**Where the receiver provides it, we also carry the ellipsoidal height** — the one
+reference that is global, computable and time-stable, and the direction the IHO
+is moving (VORF, Bathyelli tie chart datum to the GRS80 ellipsoid). Signal K
+carries the pieces already: `navigation.gnss.antennaAltitude` (height above the
+geoid) and `navigation.gnss.geoidalSeparation` give the antenna's height above
+the ellipsoid, `h = altitude + separation`. It is **conditional** — some receivers
+emit a zero or omitted separation — so the field is optional, and it is a
+_reference_, not datum-grade: the GNSS vertical is markedly noisier than the
+horizontal, and the antenna sits above the transducer by a lever arm that would
+have to be subtracted.
 
 ### 2.5 The record
 
@@ -131,6 +143,7 @@ the offset profile in force.
   source:   string,   // contributing vessel
   profile?: string,   // offset profile in force; omit when `t` resolves it
   gnss?:    { hdop?: number, fixType?: string, hAcc?: number },
+  hae?:     number,   // antenna height above the ellipsoid, when the GNSS gives it
   tide?:    number,   // water level above chart datum at `t`, when known
   tecsou?:  number,
   heading?: number,
