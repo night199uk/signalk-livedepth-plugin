@@ -316,9 +316,52 @@ A shoal only one source reports, and nothing reproduces, is charted as a
 already do, and what the standard's `featuresDetected` and caution-note machinery
 expresses.
 
-### 4.5 Reputation
+### 4.5 Temporal variability
 
-The per-tile confidence (§4.6) sees a source only _within_ a tile, so it cannot
+Some seabed moves. The standard names the concept — S-101's _category of temporal
+variation_ — and S-67 is explicit that a Zone of Confidence says nothing about
+whether the seabed is stable, so areas "subject to change" should be downgraded.
+It distinguishes two flavours worth keeping apart: **temporal degradation** (depth
+_and_ position change — silting, shoaling) and **bathymetry instability** (_no_ net
+depth change, but features move — migrating sand dunes).
+
+Do not assume a static world. The seabed's static majority is the **deep ocean**,
+which the standard separately rates "Oceanic" above 200 m and which we, sounding
+close inshore, largely do not touch. The water we sample — estuaries, channels,
+littoral shallows — is disproportionately the part that moves. So the prior for
+our footprint is **"this may change"**, not "this is static".
+
+**Separating the two causes of disagreement.** A disagreement is either the
+seabed or a source, and the two are separable:
+
+- **Temporal variance** — the per-time consensus _within_ a cell, tracked over
+  time. If it drifts, shoals or oscillates, that is the seabed.
+- **Source variance** — the spread _within a single time window_. Contributors
+  disagreeing at the same instant is a source fault, because the seabed cannot
+  have moved between them.
+- **Trend** — a monotonic shoaling is the strongest signal, and the one that
+  matters most for safety.
+
+A cell whose contributors agree at any instant but differ across instants is
+**mobile**; one whose contributors differ at the same instant is a **bad source**.
+
+**How it scales the reputation.** In a variable area a "miss" is _expected_, so it
+barely counts against a source — otherwise every honest boat sailing a shoaling
+estuary earns a bad name, precisely where good data matters most. In a stable area
+a disagreement is a source fault, and reputation learns from it hard. Variability
+also **ages the data faster**: static soundings stay good for years; a dredged
+channel's are stale in weeks (the standard's proposed _temporal validity_).
+
+Start every area **stable** — the standard's default — and let the data raise the
+flag rather than requiring anyone to declare it; geology and tidal-current data
+would sharpen the prior if ever available. The one requirement is **time overlap**:
+a tile one boat visits in March and another in August cannot tell "the seabed
+moved" from "one is wrong" — which, as ever, is learnable exactly where there are
+multiple contributors, i.e. the hotspots.
+
+### 4.6 Reputation
+
+The per-tile confidence (§4.7) sees a source only _within_ a tile, so it cannot
 notice a boat that lies consistently _across_ tiles. That needs a **global
 reputation**, and a _shared_ one — everyone agrees a boat is good — needs
 attestations: one peer's signed judgement of another's data, which is a consensus
@@ -326,7 +369,7 @@ problem in disguise. It is **deferred**; v1 ships the per-tile confidence alone.
 Until then a source is weighted by nothing but what its own soundings declare (the
 nominal quality, §2.1).
 
-### 4.6 Where and when it runs
+### 4.7 Where and when it runs
 
 **On merge, in `apply()`, cached in the tile.** Because the tile is
 self-contained — its contributors' summaries live _in_ it, not on the boats — the
@@ -348,7 +391,7 @@ irrelevant** — what they contributed is already in the tile, which is the dura
 artifact. The only offline sensitivity left is **propagation**: a sounding that
 has not yet reached its tile carries no weight, which is the correct default.
 
-### 4.7 Confidence v1
+### 4.8 Confidence v1
 
 Count _independent_ sources (distinct vessel, distinct method, not
 near-simultaneous duplicates) agreeing within tolerance; grow confidence with
@@ -386,7 +429,7 @@ cell.bySource = { <source>: { count, minCm, worstHAccM, firstT, lastT } }
   peer needs to cross-validate without the raw. Bounded by the number of
   contributors, which is small.
 - `minTime` / `maxTime` — the age.
-- `band` — the CATZOC-style confidence (§4.7), computed on merge (§4.6) and stored
+- `band` — the CATZOC-style confidence (§4.8), computed on merge (§4.7) and stored
   with the tile.
 
 A tile grows with **traffic** — a boat crossing it — not with the clock, so a
@@ -460,7 +503,7 @@ Tiny, and it replicates because a sounding's reduction depends on it.
 3. **Merkle delta** — per-tile hash and tree walk; measure wire volume.
 4. **LAN discovery**, then sparse peer-to-peer exchange with no server.
 5. **WAN** — WebRTC/TURN or a relay, with a fallback relay for CGNAT.
-6. **Validation** — the per-tile confidence (§4.7), computed on merge and stored
+6. **Validation** — the per-tile confidence (§4.8), computed on merge and stored
    with the tile.
 
 ## 7. Open questions
