@@ -5,6 +5,13 @@
 concrete design — **what to build**. Where this doc is silent, that doc is the
 rationale.
 
+**Scope: this plugin owns the data, not the channel.** The transport and sync are
+expected to come from a separate, general-purpose project (`signalk-p2p`) whose
+goals reach beyond bathymetry. So §3's stack table and §4.3's sync flow state the
+**requirements this data places on such a channel** and how its payloads are
+shaped — not an implementation to be built here. What is unambiguously ours is the
+data model (§2–§3), the merge (§4.2) and the trust (§4.4–§5).
+
 ---
 
 ## 0. Decisions this needs from you
@@ -89,7 +96,8 @@ what keep the record small (§2.6 of the other doc).
 
 ## 3. The tile bundle
 
-The unit that replicates — a Hyperbee value under key `z/x/y`.
+The unit that replicates — a Hyperbee value under key `z/x/y`, once a channel
+exists to carry it. This is our payload; the channel is `signalk-p2p`'s.
 
 ```
 tile = {

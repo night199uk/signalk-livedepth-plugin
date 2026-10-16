@@ -7,6 +7,11 @@ Two documents, in reading order:
 | [`data-quality-and-p2p.md`](data-quality-and-p2p.md) | The rationale: a shared bathymetry dataset, its data quality against the IHO/NOAA outline, and peer-to-peer sharing. |
 | [`v1-design.md`](v1-design.md)                       | The concrete design — what to build.                                                                                 |
 
+**Scope note.** The transport and sync are expected to come from a separate,
+general-purpose project (`signalk-p2p`) whose goals reach beyond bathymetry.
+These docs describe the **data** and the **requirements it places on a channel** —
+not an implementation of the channel, or of the network it runs on.
+
 **Status:** concepts settled, concrete design drafted, awaiting four decisions.
 Nothing is built; no wire or tile format is frozen.
 

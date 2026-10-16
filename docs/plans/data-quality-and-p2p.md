@@ -225,10 +225,13 @@ local log, not the replicated artifact.
 Every instance is a server with storage. Sync is **server ↔ server** (and
 server ↔ cloud); the browser is a viewport cache.
 
-### 3.5 Stack
+### 3.5 Stack — requirements on a channel
 
-**Hypercore + Hyperbee + Autobase/Autobee + Hyperswarm** — chosen because it is a
-network _and_ the database:
+The transport and sync are expected to come from a separate, general-purpose
+project (`signalk-p2p`), so read this section as **the requirements this data
+places on such a channel**, not as an implementation to build here.
+**Hypercore + Hyperbee + Autobase/Autobee + Hyperswarm** is the shape that meets
+them, because it is a network _and_ the database:
 
 | Need                                                | Primitive                                                                    |
 | --------------------------------------------------- | ---------------------------------------------------------------------------- |
