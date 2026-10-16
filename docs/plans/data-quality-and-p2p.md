@@ -1,117 +1,97 @@
-# LiveDepth: data quality and peer-to-peer sync
+# LiveDepth: a shared bathymetry dataset
 
-**Status:** design — nothing here is built. This captures the decisions made
-while working out how LiveDepth should describe its own data quality and how
-instances should share it.
+**Status:** design — this describes where we want to be, not what exists today.
 
-The goal is a **common bathymetry dataset** assembled from many vessels. Two
-questions follow from that: what must the data _carry_ to be trustworthy
-(data quality), and how do instances _exchange_ it (peer-to-peer sync). They are
-one problem, because the answer to the first is a set of per-sounding
-attributes, and that decides what the second replicates.
+The aim is a **common bathymetry dataset**: the soundings many vessels collect,
+merged into one body of water every participating boat draws on, that describes
+its own quality well enough to be trusted and compared in the terms charts
+already use ([IHO/NOAA outline](https://github.com/openwatersio/crowd-depth/blob/main/docs/plans/global-grid/standards.md)).
+
+Two things have to be true for that to work: each sounding must **carry its own
+quality** (who measured it, how well, relative to what), and instances must
+**share** the data without a central authority arbitrating the merge. These are a
+single design, because the first is a set of per-sounding attributes and the
+second replicates exactly those.
 
 ---
 
-## 1. Where we are
+## 1. The dataset
 
-**The store.** A sparse Web-Mercator XYZ tile store (`src/tiles/core/`): level
-`z` splits the world into `2^z` tiles of 256×256 cells; a cell is a 5-byte record
-`cx, cy, depthCm, count`. A tile holds the **shallowest** depth seen per cell;
-coarser levels are the min-pooled parents, so zooming out never deepens a shoal.
-It is backed by SQLite in the plugin and mirrored in memory in the browser.
+### 1.1 Shape
 
-**The pipeline.** The plugin subscribes to the vessel's own
-`environment.depth.*` + `navigation.position`, folds each sounding in, and serves
-tiles. The chart layer is a plotter extension: a background runtime owns the
-soundings and answers the host's frame requests.
+A sparse Web-Mercator XYZ tile store. Level `z` splits the world into `2^z` tiles
+of 256×256 cells; a tile holds only the cells a sounding fell in. Coarser levels
+are the **min-pooled parents** of the finer ones, so a shoal survives any
+zoom-out.
 
-**What a cell carries today:** `{ depthCm, count }` — a depth and a sample
-count. No provenance, no uncertainty, no datum, no confidence.
+### 1.2 Properties the dataset must have
+
+- **Convergent.** Any two instances that have exchanged everything hold the same
+  data, whichever order they exchanged it in and with no coordination.
+- **Verifiable.** A peer cannot silently alter history; a receiver can tell a
+  block was modified.
+- **Sparsely fetchable.** A client downloads what its queries need, and nothing
+  more.
+- **Provenance-carrying.** Every depth is attributable to a source and a time.
+
+These are not aspirations — they constrain the schema and the transport, so they
+come first.
 
 ---
 
 ## 2. Data quality
 
-The IHO/NOAA outline (see _References_) is, read as a schema, a list of
-attributes our store lacks. Grouped by what it asks for:
+A sounding carries everything needed to judge it. Grouped as the chart world
+does.
 
 ### 2.1 Provenance — who, when, with what
 
-Without per-origin provenance you cannot cross-check a claim ("one vessel says
-shallow where ten say deep") or trust anything. Needed:
-
-- **`source`** — the contributing vessel (the Signal K `$source` idiom), and the
-  sample count **per source**, not one fused `count` (also what keeps the count
-  a mergeable CRDT — see §3).
-- **`time`** — the sounding instant; carried into the tile as `minTime`/`maxTime`
-  (drives age-based downgrade).
-- **`tecsou`** — technique of sounding: single-beam, crowdsourced,
-  satellite-derived (S-57 `TECSOU`; the doc restricts SDB to unsurveyed areas,
-  `TECSOU 11`).
-- **`gnss`** — fix quality at the time (`hdop` / fix type); the raw material for
-  `QUAPOS`.
+- **`source`** — the contributing vessel.
+- **`time`** — the instant measured; rolled up per tile as `minTime`/`maxTime`.
+- **`tecsou`** — technique of sounding (single-beam, crowdsourced,
+  satellite-derived), so like can be compared with like.
+- **`gnss`** — fix quality at the time (`hdop`, fix type): the raw material for a
+  position-quality rating.
 
 ### 2.2 Uncertainty
 
-The doc gives the S-44 form `TVU(d) = sqrt(a² + (b·d)²)` with coefficients per
-order. Our depth has no error bar. Needed:
+Each sounding carries an error bar in the S-44 form `TVU(d) = sqrt(a² + (b·d)²)`:
 
-- **`hUnc`** — horizontal uncertainty, fixed + depth-dependent (GNSS fix, plus
-  any transducer-offset correction applied).
-- **`vUnc`** — vertical uncertainty in the S-44 form; components are the `a`/`b`
-  terms plus what we can actually know (draft, sound velocity, calibrated vs
-  uncalibrated sounder).
+- **`hUnc`** — horizontal uncertainty, fixed plus depth-dependent.
+- **`vUnc`** — vertical uncertainty from the terms we can actually know (draft,
+  sound velocity, calibrated vs uncalibrated sounder).
 
-Both live on the **sounding** and aggregate worst-case to the **cell**, per
-"a zone's category is the worst of its components".
+Per cell, these aggregate **worst-case** — a zone's category is the worst of its
+components.
 
 ### 2.3 Confidence — CATZOC / ZOC
 
-This is the structural one: it is **per area, not per cell** — "every area with
-depth data must be covered by quality polygons that don't overlap". A comparable
-design needs a **separate coverage layer** of non-overlapping polygons, each
-carrying:
+Confidence is **per area**, not per cell: a **coverage layer** of non-overlapping
+quality polygons, each carrying:
 
-- **`zoc`** — the zone of confidence (A1…D, U);
+- **`zoc`** — zone of confidence (A1…D, U), starting at **D** for crowdsourced
+  data until validation supports more;
 - **`categoryTemporalVariation`** — stable / unstable / unassessed;
 - **`dataAssessment`** — assessed / oceanic / unassessed;
-- **`featuresDetected`** (bool) and **`fullCoverage`** (bool) — set _false_ for
-  inadequately surveyed water;
+- **`featuresDetected`** and **`fullCoverage`** — set _false_ for inadequately
+  surveyed water;
 - **`surveyDateRange`** — from/to;
-- **`depthRange`** — the `DRVAL1`/`DRVAL2` band.
+- **`depthRange`** — the `DRVAL1`/`DRVAL2` band the area covers.
 
-Crowdsourced data defaults to **CATZOC D** until validation supports more.
+### 2.4 Reduction to a common datum
 
-### 2.4 Reduction to a common datum — the tide problem
+Uncalibrated offsets and uncorrected tide are what put crowdsourced accuracy at C
+or D; removing them is the biggest available win. Each sounding therefore carries:
 
-The doc is blunt: "uncalibrated offsets and uncorrected tide put depth accuracy
-at C or D." Today the depth is stored **as the source reports it**, tagged only
-by its configured path, so a below-keel boat and a below-surface boat are
-incomparable. Needed:
+- **`datum`** — the reference it is measured from (`belowTransducer` /
+  `belowSurface` / `belowKeel`), per sounding and not per install;
+- **`draft`** — so an off-datum sounding reduces to a common reference;
+- **`tide`** — the water level above chart datum at that moment, so a set reduces
+  toward a chart datum.
 
-- **`datum`** — per sounding (`belowTransducer` / `belowSurface` / `belowKeel`),
-  not per install;
-- **`draft`** — to reduce an off-datum sounding to a common reference;
-- **`tide`** (water level) — so a set can be reduced toward chart datum. This is
-  the single biggest accuracy win available to us.
+### 2.5 The record
 
-### 2.5 Priority
-
-If the bar is "comparable to the outline" rather than "ENC-conformant":
-
-1. **`datum` + `draft` + `tide`** — without them nothing shared is comparable
-   across vessels, and accuracy is stuck at C/D.
-2. **`source` + per-source counts + `time`** — enables cross-checking and trust,
-   and makes the count a real CRDT.
-3. **`hUnc` / `vUnc`** per sounding/cell — "depth ± x" instead of "depth".
-4. **The coverage layer** (`zoc` + the four S-101 flags) — the chart-level rigour;
-   build it when the shared dataset justifies it.
-
-### 2.6 The v2 sounding record
-
-Provenance, uncertainty and datum are **per-sounding attributes on the
-replicated feed** — which is the argument for replicating soundings rather than
-tiles (§3), and for pinning the record shape **before any sync ships**.
+The unit of trade is the **sounding**:
 
 ```
 {
@@ -120,12 +100,12 @@ tiles (§3), and for pinning the record shape **before any sync ships**.
   lat:   number,
   depth: number,          // as measured
   datum: 'belowTransducer' | 'belowSurface' | 'belowKeel',
-  draft?:     number,     // to reduce to a common reference
+  draft?:     number,
   offset?:    { forward: number, starboard: number } | null,
   source:     string,     // contributing vessel
   gnss?:      { hdop?: number, fixType?: string, hAcc?: number },
-  tide?:      number,     // water level above chart datum, if known
-  tecsou?:    number,     // technique of sounding
+  tide?:      number,
+  tecsou?:    number,
   heading?:   number,
   speed?:     number,
   hUnc?:      number,
@@ -133,8 +113,7 @@ tiles (§3), and for pinning the record shape **before any sync ships**.
 }
 ```
 
-The derived tile then carries a summarised confidence alongside the depth, not
-the raw provenance:
+The derived tile carries the summarised confidence next to the depth:
 
 ```
 cell = { depthCm, count, bySource: {...}, minTime, maxTime, vUncCm?, zoc? }
@@ -142,106 +121,92 @@ cell = { depthCm, count, bySource: {...}, minTime, maxTime, vUncCm?, zoc? }
 
 ---
 
-## 3. Peer-to-peer sync
+## 3. Sharing
 
-### 3.1 The store is already a CRDT
+### 3.1 The merge is a CRDT
 
-A cell keeps the **shallowest** depth; merging two stores is `min` per cell, and
-the pyramid is recomputed from its children. `min` is commutative, associative
-and idempotent — so peers **converge regardless of exchange order, with no
-coordination and no conflicts**. That is the hard half of convergence, already
-solved by the format.
+A cell keeps the **shallowest** depth; merging two stores is `min`, and the
+pyramid recomputes from its children. `min` is commutative, associative and
+idempotent, so instances **converge regardless of order, with no coordination**.
+`count` is not part of that — it is kept **per source** (`bySource`), which is
+both what makes it mergeable and what makes a claim checkable.
 
-**Caveat:** `count` is not a CRDT — summing fuses double-counts. Make it
-per-source (`bySource`) or drop it on the wire.
+### 3.2 Sync is Merkle + sparse
 
-### 3.2 Sync shape: Merkle + sparse
+The same pyramid is a **Merkle tree**: each tile carries `H(sorted(cell hashes))`,
+and a connection compares the coarsest level first, descending only into
+differences. Most connections exchange a few dozen hashes and nothing else, and a
+query fetches only the blocks it needs.
 
-Per-tile hashes and "exchange the summary, pull the deltas" is the right shape,
-but a parent's _pooled content_ hash does not bind its children (a child can
-change without moving the parent's min). Use a real **Merkle hash per tile** —
-`H(sorted(cell hashes))` — and the pyramid supplies the tree shape: compare the
-coarsest level, descend only into differences. Most connections then transfer a
-few dozen hashes and nothing else.
+### 3.3 What replicates
 
-### 3.3 What a peer is
+**Raw soundings, one signed append-only feed per vessel**, from which the tiles
+are derived as a shared view. This is what makes §2 possible — provenance is per
+sounding, and the tiles stay derived.
 
-The **plugin** owns the SQLite store; the browser is a viewport cache. So this is
-**server ↔ server** (and server ↔ cloud), not browser ↔ browser — no WebRTC in
-the plotter, and a Node host with real storage on both ends.
+### 3.4 Peers
 
-### 3.4 Stack — recommendation: Holepunch
+Every instance is a server with storage. Sync is **server ↔ server** (and
+server ↔ cloud); the browser is a viewport cache.
 
-**Hypercore + Hyperbee + Autobase/Autobee + Hyperswarm** over libp2p, because
-libp2p gives a _network_ while Holepunch gives a network **and the database**:
+### 3.5 Stack
 
-| Need                             | Holepunch                                                                                         |
-| -------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Sorted keyed map (z,x,y → cells) | **Hyperbee** — a B-tree on a Hypercore; a bbox/zoom query is a range scan                         |
-| Hash-delta / Merkle              | **Built in** — signed Merkle log with **sparse replication**: fetch only the blocks a query needs |
-| Integrity                        | Hypercore's signed Merkle tree — tampering is detectable                                          |
-| Multi-writer merge               | **Autobase** (causal DAG → deterministic order) with **Autobee**, a multi-writer KV store         |
-| Discovery + NAT + LAN            | **Hyperswarm / HyperDHT** — DHT discovery, UDP hole-punching, LAN-local                           |
+**Hypercore + Hyperbee + Autobase/Autobee + Hyperswarm** — chosen because it is a
+network _and_ the database:
 
-Autobase's `apply()` is _the single ordering authority — the only place entries
-are validated_: the hook for the data-quality gate. The **OpenPact** project is a
-working template of exactly this architecture.
+| Need                                                | Primitive                                                                    |
+| --------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Sorted keyed map (z,x,y → cells), bbox/zoom queries | **Hyperbee** — a B-tree on a Hypercore; a bbox query is a range scan         |
+| Merkle + sparse fetch                               | **Hypercore** — a signed Merkle log with sparse replication                  |
+| Integrity                                           | Hypercore's signed Merkle tree                                               |
+| Multi-writer merge                                  | **Autobase** + **Autobee**, whose `apply()` is the single ordering authority |
+| Discovery, NAT, LAN                                 | **Hyperswarm / HyperDHT** — DHT discovery, UDP hole-punching, LAN-local      |
 
-**When libp2p instead:** cross-language (non-JS) peers, browser peers
-(WebRTC/WebTransport), or riding the IPFS DHT. It is the safer, more conventional
-network — but you build the store, the Merkle and the sparse sync yourself.
+`apply()` is where **validation lives** — the gate every incoming sounding passes
+before it reaches the view. [OpenPact](https://openpact.dev/docs/architecture/)
+is a working reference of this architecture.
 
-### 3.5 Replicate soundings, not tiles
+**libp2p** is the alternative when we need cross-language or browser peers, or to
+ride the IPFS DHT — but it gives only the network; the store, the Merkle and the
+sparse sync would be ours to build.
 
-Replicate each vessel's **raw soundings** (one Hypercore per vessel, signed,
-append-only) and derive the tiles as a **Hyperbee view** in `apply()`. This is
-what makes §2 possible: provenance is per sounding, validation happens in
-`apply()`, and the tiles stay derived.
+### 3.6 Constraints to live with
 
-### 3.6 Caveats
-
-- **JS-only** (fine for a Node plugin; not cross-language).
-- **Smaller community** than libp2p, though a coherent stack.
-- **CGNAT/Starlink is hard for everyone** — expect to run a relay/seed for the
-  tail (OpenPact's bootstrap + seed model).
-- **Dependency weight** — a real stack to pull into a Signal K plugin.
-- **Autobase may be unnecessary.** The `min` merge converges without ordering;
-  Autobase earns its place only because _validation_ is order-sensitive and you
-  need **membership**. Without validation, N plain Hypercores merged by `min`
-  would do.
+- **JS-only** on the Holepunch path.
+- **CGNAT/Starlink** defeats hole-punching for a tail of pairs — a relay/seed is
+  part of the design, not a fallback.
+- **Dependency weight** — a real stack inside a Signal K plugin.
+- **Autobase only if validation needs ordering.** The `min` merge converges
+  without it; it earns its place through validation and membership.
 
 ---
 
 ## 4. Plan
 
-1. **Prove the merge** — two local stores, whole-tile exchange over HTTP, confirm
-   convergence. Cheap, and it validates the CRDT claim.
-2. **Pin the v2 sounding record** (§2.6) and the coverage-layer shape — **before
-   any sync ships**, since the format is a breaking change across peers.
-3. **Merkle delta** — per-tile hash + tree walk; measure wire volume on a real
-   boat's store.
-4. **LAN discovery** — then peer-to-peer exchange, no server.
-5. **WAN** — WebRTC/TURN or a relay, plus a fallback relay (CGNAT).
-6. **Validation layer** — provenance, cross-checking, CATZOC-style confidence,
-   living in `apply()`.
+1. **Prove the merge** — two local stores, whole-tile exchange, confirm
+   convergence.
+2. **Pin the sounding record (§2.5) and the coverage-layer shape** — before any
+   sync ships; the format is a breaking change across peers.
+3. **Merkle delta** — per-tile hash and tree walk; measure wire volume.
+4. **LAN discovery**, then peer-to-peer exchange with no server.
+5. **WAN** — WebRTC/TURN or a relay, with a fallback relay for CGNAT.
+6. **Validation** — provenance, cross-checking and CATZOC-style confidence,
+   inside `apply()`.
 
 ## 5. Open questions
 
-- **Privacy.** Syncing publishes your track. Open, opt-in peers, or aggregated?
-  Decide before the format ossifies.
+- **Privacy** — syncing publishes a track. Open, opt-in peers, or aggregated?
 - **What is a write?** One feed per vessel, or per vessel-and-voyage?
-- **Tide source.** Where does `tide` come from when the server has no tide
+- **Tide source** — where does `tide` come from when a vessel has no tide
   provider, and what do we do when it is unknown?
-- **Coverage layer or per-cell flag?** The outline wants polygons; a per-cell
-  `zoc` is far cheaper and possibly enough for a screen layer.
+- **Coverage layer or per-cell flag?** Polygons are what the outline wants; a
+  per-cell `zoc` is far cheaper and may be enough for a screen surface.
 - **Autobase or plain feeds?** Depends on whether validation is centralised.
 
 ## References
 
-- IHO/NOAA standards as applied to the Crowd-Depth global grid:
-  `openwatersio/crowd-depth` — `docs/plans/global-grid/standards.md`
-  (CATZOC, S-44 survey orders, S-4 derivation, S-57/S-101 encoding).
-- Hypercore, Hyperbee, Autobase, Autobee, Hyperswarm — `holepunchto/*`.
-- OpenPact — a reference architecture on the above
-  (<https://openpact.dev/docs/architecture/>).
-- libp2p — `libp2p/js-libp2p` (the network-only alternative).
+- IHO/NOAA standards for crowdsourced bathymetry:
+  <https://github.com/openwatersio/crowd-depth/blob/main/docs/plans/global-grid/standards.md>
+- Hypercore, Hyperbee, Autobase, Autobee, Hyperswarm — `holepunchto/*`
+- OpenPact reference architecture — <https://openpact.dev/docs/architecture/>
+- libp2p — `libp2p/js-libp2p`
