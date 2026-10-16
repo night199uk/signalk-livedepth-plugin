@@ -228,9 +228,12 @@ network _and_ the database:
 | Multi-writer merge                                  | **Autobase** + **Autobee**, whose `apply()` is the single ordering authority |
 | Discovery, NAT, LAN                                 | **Hyperswarm / HyperDHT** — DHT discovery, UDP hole-punching, LAN-local      |
 
-`apply()` is where **validation lives** — the gate every incoming sounding passes
-before it reaches the view. [OpenPact](https://openpact.dev/docs/architecture/)
-is a working reference of this architecture.
+`apply()` is where the **merge** lives — the deterministic reduction of each
+writer's soundings into the shared view, computed identically on every peer. It is
+deliberately _not_ where trust is assessed: confidence depends on which peers a
+reader has fetched, so it is a reader-side overlay (§4), not shared state.
+[OpenPact](https://openpact.dev/docs/architecture/) is a working reference of this
+architecture.
 
 **libp2p** is the alternative when we need cross-language or browser peers, or to
 ride the IPFS DHT — but it gives only the network; the store, the Merkle and the
@@ -247,27 +250,189 @@ sparse sync would be ours to build.
 
 ---
 
-## 4. Plan
+## 4. Validation and confidence
+
+The data cannot tell us what is true; trust has to be derived. The value we chart
+stays the **minimum** — the safety rule, never deeper than a report — and the
+**confidence** is a separate output that says how much to believe it.
+
+### 4.1 Two questions, not one
+
+- **Is the measurement good?** Self-declared: the fix class and accuracy, whether
+  the sounder is calibrated, whether the datum and offset were known. A _nominal_
+  uncertainty, and spoofable — a bad boat can claim RTK. Necessary, not
+  sufficient.
+- **Is the claim good?** Verified: do _independent_ sources, over time, agree? A
+  property of the _set_, not of the sounding, so it cannot be self-declared.
+
+### 4.2 The factors
+
+- **Agreement** — how many independent sources land within tolerance at a cell.
+- **Independence** — the crux (§4.3).
+- **Age** — the seabed moves; the standard's _temporal variation_.
+- **Nominal quality** — the first question, as a weight.
+
+### 4.3 Independence
+
+"Ten boats agree" is worthless if they are not ten independent observations.
+
+- **Common-mode error** — ten boats sharing a wrong datum, tide model or sounder
+  all agree _and are all wrong_. Independence must include the **method** (the
+  datum source, the tide source, `tecsou`), not just the vessel.
+- **Collusion / Sybil** — one operator standing up ten fake vessels. Not solvable
+  without identity, but make it _costly_: weight agreement by a source's **tenure
+  and volume**, and treat a burst from a young, single-purpose source as
+  low-weight.
+- **Double-counting** — the same pass replayed. The **time** dimension catches it:
+  near-simultaneous, near-identical fixes from one source are one observation.
+
+### 4.4 The safety/outlier split
+
+A single false shallow reading (a fish, a bubble, a transducer fault) would
+otherwise own a cell forever. Resolve it by keeping the two outputs apart:
+
+> **Keep the shallow value; do not grant it confidence.**
+
+A shoal only one source reports, and nothing reproduces, is charted as a
+**doubtful sounding** — shown (safety) and marked (trust). That is what charts
+already do, and what the standard's `featuresDetected` and caution-note machinery
+expresses.
+
+### 4.5 Reputation
+
+A _shared_ reputation — everyone agrees a boat is good — needs attestations (one
+peer's signed judgement of another's data), which is a consensus problem in
+disguise. Start with **local** reputation: each peer cross-validates against what
+it has fetched and weights sources accordingly. No coordination, no consensus; two
+peers may disagree about a boat, which is fine, because confidence is a display
+property, not shared state.
+
+### 4.6 Where it runs
+
+- **Shared and deterministic:** the merge — `min` plus the per-source summary.
+  Every peer converges on it.
+- **Local overlay:** the confidence. It depends on what the reader has fetched, is
+  non-deterministic by nature, and **must not live in `apply()`** — a shared view
+  that differed per peer would break convergence.
+
+### 4.7 Confidence v1
+
+Count _independent_ sources (distinct vessel, distinct method, not
+near-simultaneous duplicates) agreeing within tolerance; grow confidence with
+their count and their worst nominal accuracy, and decay it with age; collapse it
+to a **CATZOC-style band** — `D` unconfirmed → `C` single confirmed → `B`
+corroborated — because that is the vocabulary charts and users already speak.
+
+**Caveat:** this verifies **consensus, not truth** — ten boats can agree on
+something false. Consensus, independence and provenance are the strongest signals
+a crowd offers, and they are exactly what CATZOC was built to express.
+
+---
+
+## 5. Storage
+
+Three kinds of thing, with very different growth, kept apart.
+
+### 5.1 Soundings — the raw record (per vessel)
+
+One row per sounding, the §2.5 record, held **on the vessel that collected it**.
+It is the source of truth and the unit that _replicates sparsely_ (§3.3) — it is
+not copied to every peer.
+
+```
+soundings(
+  t              INTEGER,  -- unix ms
+  source         TEXT,     -- vessel id
+  lon, lat       REAL,     -- WGS84
+  depth          REAL,     -- below surface (canonical, §2.4)
+  profile        INTEGER,  -- FK -> profiles
+  method_quality INTEGER,  -- GNSS fix class
+  hdop           REAL,
+  h_acc          REAL,     -- horizontal accuracy, m
+  hae            REAL,     -- antenna height above ellipsoid, when given
+  tide           REAL,     -- water level above chart datum, when known
+  tecsou         INTEGER,
+  heading        REAL,
+  speed          REAL,
+  h_unc          REAL,
+  v_unc          REAL
+)
+```
+
+**Growth: the one unbounded axis** — roughly 0.6–2 MB/hour, hundreds of MB a year,
+GBs if the sounder runs continuously. Bounded _per vessel_, which is what makes
+sparse replication viable. Retention is the operator's call: keep it all, or roll
+a window and let the derived store be the durable artifact.
+
+### 5.2 Tiles — the derived index (replicated)
+
+The sparse Web-Mercator store, and the thing that actually replicates between
+peers — **bounded by the geography sailed**, not by time. A tile's cells carry the
+summarised provenance and confidence beside the depth:
+
+```
+cell = { cx, cy, depthCm, count, bySource, hAccCm?, minTime, maxTime, band? }
+```
+
+- `depthCm` — the minimum (the charted value).
+- `bySource` — a small map of source → { count, worst `h_acc` } — the provenance a
+  reader needs to cross-validate without the raw.
+- `minTime` / `maxTime` — the age.
+- `band` — the CATZOC-style confidence (§4.7).
+
+This summary is what keeps provenance _bounded_: a cell's contributors do not grow
+the way a sample log does.
+
+### 5.3 Profiles — the offset geometry (per vessel)
+
+Versioned, non-overlapping spans (§2.4):
+
+```
+profiles(
+  id                   INTEGER PRIMARY KEY,
+  source               TEXT,
+  from_t, to_t         INTEGER,  -- the span this geometry was in force
+  transducer_offset_cm REAL,
+  draft_cm             REAL
+)
+```
+
+Tiny, and it replicates because a sounding's reduction depends on it.
+
+### 5.4 Deliberately not stored
+
+- **A fleet-wide sounding replica.** The raw stays on its origin and is fetched
+  sparsely; the replicated index is the tiles (§5.2).
+- **The tide as a per-sounding column, in the common case.** It is a smooth
+  function of position and time, so a per-voyage series (or a resolver) is
+  cheaper; record it per sounding only where the source gives it directly.
+
+---
+
+## 6. Plan
 
 1. **Prove the merge** — two local stores, whole-tile exchange, confirm
    convergence.
-2. **Pin the sounding record (§2.5) and the coverage-layer shape** — before any
-   sync ships; the format is a breaking change across peers.
+2. **Pin the sounding record (§2.5), the cell summary (§5.2) and the profile
+   (§5.3)** — before any sync ships; the format is a breaking change across peers.
 3. **Merkle delta** — per-tile hash and tree walk; measure wire volume.
-4. **LAN discovery**, then peer-to-peer exchange with no server.
+4. **LAN discovery**, then sparse peer-to-peer exchange with no server.
 5. **WAN** — WebRTC/TURN or a relay, with a fallback relay for CGNAT.
-6. **Validation** — provenance, cross-checking and CATZOC-style confidence,
-   inside `apply()`.
+6. **Validation** — the confidence overlay (§4.7) at the reader, over the
+   per-source summary.
 
-## 5. Open questions
+## 7. Open questions
 
 - **Privacy** — syncing publishes a track. Open, opt-in peers, or aggregated?
 - **What is a write?** One feed per vessel, or per vessel-and-voyage?
 - **Tide source** — where does `tide` come from when a vessel has no tide
   provider, and what do we do when it is unknown?
-- **Coverage layer or per-cell flag?** Polygons are what the outline wants; a
-  per-cell `zoc` is far cheaper and may be enough for a screen surface.
-- **Autobase or plain feeds?** Depends on whether validation is centralised.
+- **Coverage layer or per-cell band?** Polygons are what the outline wants; a
+  per-cell band (§5.2) is far cheaper and may be enough for a screen surface.
+- **Raw retention** — keep the origin's sounding log forever, or a rolling
+  window, with the derived store durable?
+- **Band thresholds** — the agreement tolerance and the count that promotes a cell
+  from `C` to `B` need calibration against real data.
 
 ## References
 
