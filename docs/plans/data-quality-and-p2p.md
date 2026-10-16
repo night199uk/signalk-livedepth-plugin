@@ -50,8 +50,15 @@ does.
 - **`time`** — the instant measured; rolled up per tile as `minTime`/`maxTime`.
 - **`tecsou`** — technique of sounding (single-beam, crowdsourced,
   satellite-derived), so like can be compared with like.
-- **`gnss`** — fix quality at the time (`hdop`, fix type): the raw material for a
-  position-quality rating.
+- **`gnss`** — fix quality at the time: the fix class
+  (`navigation.gnss.methodQuality`), the dilution of precision
+  (`horizontalDilution` / `verticalDilution`), and the **horizontal accuracy in
+  metres**. The last varies fix to fix, so it is recorded per sounding; it is
+  what feeds `hUnc` (§2.2). Signal K has no single accuracy field in its core
+  `navigation.gnss` set, but implementations commonly publish
+  `navigation.gnss.horizontalAccuracy` (the schema is open — `[k: string]:
+unknown`); where it is absent, derive it from the DOP and the fix class
+  (RTK-fixed ≈ cm, RTK-float ≈ dm, autonomous ≈ m).
 
 ### 2.2 Uncertainty
 
