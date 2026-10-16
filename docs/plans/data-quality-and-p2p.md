@@ -238,10 +238,11 @@ network _and_ the database:
 | Multi-writer merge                                  | **Autobase** + **Autobee**, whose `apply()` is the single ordering authority |
 | Discovery, NAT, LAN                                 | **Hyperswarm / HyperDHT** — DHT discovery, UDP hole-punching, LAN-local      |
 
-`apply()` is where the **merge** lives — the deterministic reduction of each
-writer's soundings into the shared view, computed identically on every peer. It is
-deliberately _not_ where trust is assessed: confidence depends on which peers a
-reader has fetched, so it is a reader-side overlay (§4), not shared state.
+`apply()` is where the **merge and its confidence** live — the deterministic
+reduction of each writer's soundings into the shared view, plus the trust that
+rides with it, computed identically on every peer. Both are pure functions of the
+tile, which is self-contained (§4.7), so both are shared state and neither depends
+on what a reader happens to have fetched.
 [OpenPact](https://openpact.dev/docs/architecture/) is a working reference of this
 architecture.
 
@@ -255,8 +256,9 @@ sparse sync would be ours to build.
 - **CGNAT/Starlink** defeats hole-punching for a tail of pairs — a relay/seed is
   part of the design, not a fallback.
 - **Dependency weight** — a real stack inside a Signal K plugin.
-- **Autobase only if validation needs ordering.** The `min` merge converges
-  without it; it earns its place through validation and membership.
+- **Autobase earns its place twice**: membership (and the validation that hangs
+  off it), and the deterministic confidence computed on merge (§4.7). The bare
+  `min` merge would converge without it.
 
 ---
 
@@ -506,18 +508,19 @@ Tiny, and it replicates because a sounding's reduction depends on it.
 6. **Validation** — the per-tile confidence (§4.8), computed on merge and stored
    with the tile.
 
-## 7. Open questions
+## 7. Decisions and open questions
 
-- **Privacy** — syncing publishes a track. Open, opt-in peers, or aggregated?
+This doc reasons; the **[v1 design](v1-design.md)** decides. It needs four answers
+(its §0): the **stack** (D1), **identity and membership** (D2), **privacy** (D3) and
+the **v1 scope** (D4). Two smaller questions are not yet placed:
+
 - **What is a write?** One feed per vessel, or per vessel-and-voyage?
-- **Tide source** — where does `tide` come from when a vessel has no tide
-  provider, and what do we do when it is unknown?
-- **Coverage layer or per-cell band?** Polygons are what the outline wants; a
-  per-cell band (§5.2) is far cheaper and may be enough for a screen surface.
-- **Raw retention** — keep the origin's sounding log forever, or a rolling
-  window, with the derived store durable?
-- **Band thresholds** — the agreement tolerance and the count that promotes a cell
-  from `C` to `B` need calibration against real data.
+- **Tide source** — where does `tide` come from when a vessel has no tide provider,
+  and what do we do when it is unknown?
+
+Everything else that looks open is **calibration, not design** — the agreement
+tolerance, the band thresholds, the decay rates, the reputation's prior — and the
+v1 design lists them as deferred (its §7).
 
 ## References
 
