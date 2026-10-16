@@ -45,8 +45,10 @@ const DEBOUNCE_MS = 400;
 const POLL_MS = 15000;
 /** Most tile fetches a single view may need before the layer draws nothing. */
 const MAX_TILE_FETCHES = 24;
-/** How long live soundings are batched before folding into the client store. */
-const LIVE_FLUSH_MS = 2000;
+/** How long live soundings are batched before folding into the client store.
+ * Kept short so the surface fills in under the bow rather than a couple of
+ * seconds behind it. */
+const LIVE_FLUSH_MS = 300;
 /** Depth path when the plugin advertises none. */
 const DEFAULT_DEPTH_PATH = "environment.depth.belowTransducer";
 
@@ -60,6 +62,9 @@ let transducer: TransducerOffset | null = null;
 let depthPath = DEFAULT_DEPTH_PATH;
 
 let samples: DepthSample[] = [];
+/** The server-derived soundings (tiles or history), without the client's live
+ * extension — the base `compose()` folds the live cells onto. */
+let baseSamples: DepthSample[] = [];
 let lastReq: RenderRequest | null = null;
 let busy = false;
 let dirty = false;
@@ -165,8 +170,8 @@ async function fetchHistory(): Promise<void> {
     const { lon, lat } = correct(row.position[0], row.position[1], row.heading);
     out.push({ lon, lat, depth: row.depth });
   }
-  samples = out;
-  publish();
+  baseSamples = out;
+  compose();
 }
 
 async function fetchTiles(req: RenderRequest): Promise<void> {
@@ -196,7 +201,22 @@ async function fetchTiles(req: RenderRequest): Promise<void> {
       }),
     ),
   );
-  // Fold in the own vessel's live extension at the same level.
+  baseSamples = out;
+  compose();
+}
+
+/** The client store's live soundings for the current view, at the level the
+ * view is drawn at. */
+function clientSamples(): DepthSample[] {
+  const bbox = lastReq?.bounds;
+  if (!bbox || !lastZoom) {
+    return [];
+  }
+  const { xs, ys } = tileRangeForBbox(bbox, lastZoom);
+  if (xs.length * ys.length > MAX_TILE_FETCHES) {
+    return [];
+  }
+  const out: DepthSample[] = [];
   for (const x of xs) {
     for (const y of ys) {
       const cells = clientStore.read(lastZoom, x, y);
@@ -205,7 +225,13 @@ async function fetchTiles(req: RenderRequest): Promise<void> {
       }
     }
   }
-  samples = out;
+  return out;
+}
+
+/** The drawn soundings: the server data plus the live extension, composed
+ * locally so a flush never needs a network round trip. */
+function compose(): void {
+  samples = [...baseSamples, ...clientSamples()];
   publish();
 }
 
@@ -283,7 +309,9 @@ function flushLive(): void {
   if (!liveDirty) return;
   liveDirty = false;
   clientAccumulator.flush();
-  if (settings.source === "tiles" && lastReq) void fetchTiles(lastReq);
+  // Fold the new soundings in locally — no tile re-fetch, so the live path is
+  // just the store write plus the render.
+  compose();
 }
 
 // ******** frame cycle ********
