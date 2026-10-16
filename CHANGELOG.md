@@ -4,6 +4,15 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-10-16
+
+### Fixed
+
+- The chart layer no longer lags the vessel by 2–3 seconds. Live soundings were
+  batched for two seconds, and each batch re-fetched every tile for the view
+  over HTTP; they now fold into the frame every 300 ms without a network round
+  trip, so the surface fills in under the bow.
+
 ## [0.3.0] - 2026-10-15
 
 The LiveDepth chart layer, and the merge that brings everything into one
