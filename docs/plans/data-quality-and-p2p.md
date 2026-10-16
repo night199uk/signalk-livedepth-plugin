@@ -204,11 +204,21 @@ query fetches only the blocks it needs.
 
 ### 3.3 What replicates
 
-**Raw soundings, one signed append-only feed per vessel — each reduced to depth
-below surface (§2.4) — plus that vessel's offset profiles.** The tiles are
-derived from those as a shared view. This is what makes §2 possible: every
-sounding arrives in one datum, so peers are directly comparable; provenance is
-per sounding; and the tiles stay derived.
+**The tile — as a self-contained bundle.** A tile carries its cells (the depth),
+its **per-source summaries** (the provenance) and its **confidence** (§4), so
+fetching a tile yields the value, who stands behind it and how much to trust it,
+together. There is no separate feed-plus-index to reconcile: the tile _is_ the
+unit of storage, replication, validation and display.
+
+Replicating tiles rather than soundings is also what makes the growth tractable.
+A tile is bounded by the **geography** sailed and by its **contributors** — a
+handful of per-source summaries, not a sample log — so it grows with _traffic_,
+not with time. A vessel that stops moving stops adding tiles; a vessel at anchor
+adds none.
+
+Each contributor also keeps its own **raw sounding log**, reduced to depth below
+surface (§2.4), for re-derivation and audit (§5.2) — but that is an append-only
+local log, not the replicated artifact.
 
 ### 3.4 Peers
 
@@ -286,6 +296,14 @@ stays the **minimum** — the safety rule, never deeper than a report — and th
 - **Double-counting** — the same pass replayed. The **time** dimension catches it:
   near-simultaneous, near-identical fixes from one source are one observation.
 
+Independence is also **cheap to check**, because it is only ever needed _per
+tile_. A tile has 0, 1 or a handful of contributors whether the fleet is a hundred
+boats or a hundred thousand — reaching a tile means physically sailing over it. So
+consensus is **rare** (only multi-source tiles), **local** (it never looks past
+the tile) and **small-N** (a few summaries, not a fleet). Everywhere but the
+hotspots — the Solent, the Chesapeake — there is one contributor and nothing to
+reconcile, and the machinery below simply does not run.
+
 ### 4.4 The safety/outlier split
 
 A single false shallow reading (a fish, a bubble, a transducer fault) would
@@ -300,20 +318,35 @@ expresses.
 
 ### 4.5 Reputation
 
-A _shared_ reputation — everyone agrees a boat is good — needs attestations (one
-peer's signed judgement of another's data), which is a consensus problem in
-disguise. Start with **local** reputation: each peer cross-validates against what
-it has fetched and weights sources accordingly. No coordination, no consensus; two
-peers may disagree about a boat, which is fine, because confidence is a display
-property, not shared state.
+The per-tile confidence (§4.6) sees a source only _within_ a tile, so it cannot
+notice a boat that lies consistently _across_ tiles. That needs a **global
+reputation**, and a _shared_ one — everyone agrees a boat is good — needs
+attestations: one peer's signed judgement of another's data, which is a consensus
+problem in disguise. It is **deferred**; v1 ships the per-tile confidence alone.
+Until then a source is weighted by nothing but what its own soundings declare (the
+nominal quality, §2.1).
 
-### 4.6 Where it runs
+### 4.6 Where and when it runs
 
-- **Shared and deterministic:** the merge — `min` plus the per-source summary.
-  Every peer converges on it.
-- **Local overlay:** the confidence. It depends on what the reader has fetched, is
-  non-deterministic by nature, and **must not live in `apply()`** — a shared view
-  that differed per peer would break convergence.
+**On merge, in `apply()`, cached in the tile.** Because the tile is
+self-contained — its contributors' summaries live _in_ it, not on the boats — the
+confidence is a pure function of the tile, so it is deterministic and identical on
+every peer. It is **shared state**, not a reader-side overlay: the earlier worry
+that confidence depended on what a reader had fetched only applied while the
+contributors lived elsewhere.
+
+When a sounding folds into its tile:
+
+1. the cell's `min` updates;
+2. the source's summary updates — `count++`, `min = min(...)`, `hAcc = worst(...)`,
+   `lastT = t`;
+3. the confidence recomputes from the tile and is **stored in it**.
+
+The reader reads the confidence; it never recomputes it. And because the
+computation is over the tile, **whether the contributors are online is
+irrelevant** — what they contributed is already in the tile, which is the durable
+artifact. The only offline sensitivity left is **propagation**: a sounding that
+has not yet reached its tile carries no weight, which is the correct default.
 
 ### 4.7 Confidence v1
 
@@ -333,11 +366,38 @@ a crowd offers, and they are exactly what CATZOC was built to express.
 
 Three kinds of thing, with very different growth, kept apart.
 
-### 5.1 Soundings — the raw record (per vessel)
+### 5.1 The tile — the durable, replicated unit
 
-One row per sounding, the §2.5 record, held **on the vessel that collected it**.
-It is the source of truth and the unit that _replicates sparsely_ (§3.3) — it is
-not copied to every peer.
+The atomic artifact: **bounded by geography** (not time) and by its **contributors**
+(not samples). It carries the value, the provenance and the confidence together,
+so a peer that fetches it can both draw it and judge it.
+
+```
+tile = {
+  z, x, y, updated,
+  cells: [ { cx, cy, depthCm, count, bySource, hAccCm?, minTime, maxTime, band } ]
+}
+
+cell.bySource = { <source>: { count, minCm, worstHAccM, firstT, lastT } }
+```
+
+- `depthCm` — the minimum (the charted value).
+- `bySource` — **one record per contributor, not per sounding** — the provenance a
+  peer needs to cross-validate without the raw. Bounded by the number of
+  contributors, which is small.
+- `minTime` / `maxTime` — the age.
+- `band` — the CATZOC-style confidence (§4.7), computed on merge (§4.6) and stored
+  with the tile.
+
+A tile grows with **traffic** — a boat crossing it — not with the clock, so a
+vessel at anchor adds nothing.
+
+### 5.2 The raw log — the origin's audit trail (per vessel)
+
+Each vessel keeps its own soundings, reduced to depth below surface (§2.4), for
+**re-derivation and audit only**: a new tide, a shoal post-mortem. It is _not_ the
+replicated artifact and is _not_ copied to every peer; a seed keeps it alive for
+the tail.
 
 ```
 soundings(
@@ -359,29 +419,10 @@ soundings(
 )
 ```
 
-**Growth: the one unbounded axis** — roughly 0.6–2 MB/hour, hundreds of MB a year,
-GBs if the sounder runs continuously. Bounded _per vessel_, which is what makes
-sparse replication viable. Retention is the operator's call: keep it all, or roll
-a window and let the derived store be the durable artifact.
-
-### 5.2 Tiles — the derived index (replicated)
-
-The sparse Web-Mercator store, and the thing that actually replicates between
-peers — **bounded by the geography sailed**, not by time. A tile's cells carry the
-summarised provenance and confidence beside the depth:
-
-```
-cell = { cx, cy, depthCm, count, bySource, hAccCm?, minTime, maxTime, band? }
-```
-
-- `depthCm` — the minimum (the charted value).
-- `bySource` — a small map of source → { count, worst `h_acc` } — the provenance a
-  reader needs to cross-validate without the raw.
-- `minTime` / `maxTime` — the age.
-- `band` — the CATZOC-style confidence (§4.7).
-
-This summary is what keeps provenance _bounded_: a cell's contributors do not grow
-the way a sample log does.
+**This is the one unbounded axis** — roughly 0.6–2 MB/hour, hundreds of MB a year,
+GBs if the sounder runs continuously. It is bounded _per vessel_, which keeps the
+cost local, and its retention is the operator's call: keep it all, or roll a
+window and let the tiles be the durable record.
 
 ### 5.3 Profiles — the offset geometry (per vessel)
 
@@ -401,8 +442,9 @@ Tiny, and it replicates because a sounding's reduction depends on it.
 
 ### 5.4 Deliberately not stored
 
-- **A fleet-wide sounding replica.** The raw stays on its origin and is fetched
-  sparsely; the replicated index is the tiles (§5.2).
+- **A fleet-wide sounding replica.** The raw stays on its origin and a seed; the
+  replicated artifact is the tile (§5.1), whose per-source summaries carry the
+  provenance the crowd needs.
 - **The tide as a per-sounding column, in the common case.** It is a smooth
   function of position and time, so a per-voyage series (or a resolver) is
   cheaper; record it per sounding only where the source gives it directly.
@@ -418,8 +460,8 @@ Tiny, and it replicates because a sounding's reduction depends on it.
 3. **Merkle delta** — per-tile hash and tree walk; measure wire volume.
 4. **LAN discovery**, then sparse peer-to-peer exchange with no server.
 5. **WAN** — WebRTC/TURN or a relay, with a fallback relay for CGNAT.
-6. **Validation** — the confidence overlay (§4.7) at the reader, over the
-   per-source summary.
+6. **Validation** — the per-tile confidence (§4.7), computed on merge and stored
+   with the tile.
 
 ## 7. Open questions
 
