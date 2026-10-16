@@ -51,10 +51,9 @@ D3 is yours.
 
 ```
   sensors ──► Resolver ──► Merger ──► Local store ──► Reader ──► chart layer
-   (SK)        (§2)         (§3)        (§4)            (§4)
-                              │            │
-                              │            └──► Sync ◄──► peers / seed
-                              └──► Validator (§5)         (§6)
+   (SK)                     │            │
+                            │            └──► Sync ◄──► peers / seed
+                            └──► Validator
 ```
 
 - **Resolver** — turns a raw `environment.depth.*` + position + GNSS + tide into
@@ -98,7 +97,7 @@ tile = {
   cells: [ Cell ],           // sparse, row-major, as today
   sources: [ SourceRef ],    // the source table this tile references
   profiles: [ Profile ],     // the profile table this tile references
-  band: u8,                  // CATZOC-style confidence (§5)
+  band: u8,                  // CATZOC-style confidence (§4.4)
   updated: u32
 }
 
@@ -123,7 +122,7 @@ peer that fetches it can both draw and judge it.
 ### 4.1 Ingest (live)
 
 1. The collector pairs a depth with the latest position, heading and GNSS and
-   resolves the tide (§ Resolver).
+   resolves the tide (Resolver, §1).
 2. The resolver reduces to below surface using the profile in force, and emits a
    sounding.
 3. The sounding is appended to the raw log.
