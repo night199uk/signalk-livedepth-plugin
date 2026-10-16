@@ -78,38 +78,65 @@ quality polygons, each carrying:
 - **`surveyDateRange`** — from/to;
 - **`depthRange`** — the `DRVAL1`/`DRVAL2` band the area covers.
 
-### 2.4 Reduction to a common datum
+### 2.4 The stored datum and the offset profile
 
-Uncalibrated offsets and uncorrected tide are what put crowdsourced accuracy at C
-or D; removing them is the biggest available win. Each sounding therefore carries:
+**Depth is always stored below surface.** It is the one datum every boat can
+agree on, and it makes the shared dataset comparable — a below-keel boat and a
+below-transducer boat contribute the same units. The plugin reduces on write:
+`derived-data` synthesises `belowSurface` from whichever of the transducer offset
+or the draft the vessel has configured, and the plugin **refuses in the schema,
+with a message to the user,** when neither is available and the datum cannot be
+resolved.
 
-- **`datum`** — the reference it is measured from (`belowTransducer` /
-  `belowSurface` / `belowKeel`), per sounding and not per install;
-- **`draft`** — so an off-datum sounding reduces to a common reference;
-- **`tide`** — the water level above chart datum at that moment, so a set reduces
-  toward a chart datum.
+**The offsets travel as a versioned profile**, not on every sounding. A profile
+is the vessel's geometry over a span of time:
+
+```
+profile = { from, to, transducerOffsetCm, draftCm }
+```
+
+`transducerOffsetCm` is the surface→transducer distance; `draftCm` is the
+surface→keel distance. Loading changes the draft and re-rigging changes the
+transducer, so each closes one profile and opens another. **Profiles never
+overlap in time** — exactly one is in force at any instant.
+
+**A sounding references its profile** — an id, or nothing at all when its `time`
+already resolves the profile in force — so the per-sounding cost of the offsets
+is a few bits at most, against the two bytes a raw pair on every point would cost
+(§2.6). The profile belongs to the vessel's feed and replicates with it.
+
+**The other datums are derived at display,** by static subtraction:
+
+```
+belowTransducer = belowSurface − transducerOffset
+belowKeel       = belowSurface − draft
+chartDatum      = belowSurface − tide
+```
+
+The first two are pure geometry and exact for the profile in force. The third is
+the only one that depends on knowing the tide, and is the difference between
+CATZOC C/D and something better.
 
 ### 2.5 The record
 
-The unit of trade is the **sounding**:
+The unit of trade is the **sounding**: depth below surface, with a reference to
+the offset profile in force.
 
 ```
 {
-  t:     number,          // instant
-  lon:   number,
-  lat:   number,
-  depth: number,          // as measured
-  datum: 'belowTransducer' | 'belowSurface' | 'belowKeel',
-  draft?:     number,
-  offset?:    { forward: number, starboard: number } | null,
-  source:     string,     // contributing vessel
-  gnss?:      { hdop?: number, fixType?: string, hAcc?: number },
-  tide?:      number,
-  tecsou?:    number,
-  heading?:   number,
-  speed?:     number,
-  hUnc?:      number,
-  vUnc?:      number
+  t:        number,   // instant
+  lon:      number,
+  lat:      number,
+  depth:    number,   // below surface — the canonical datum
+  source:   string,   // contributing vessel
+  profile?: string,   // offset profile in force; omit when `t` resolves it
+  gnss?:    { hdop?: number, fixType?: string, hAcc?: number },
+  tide?:    number,   // water level above chart datum at `t`, when known
+  tecsou?:  number,
+  heading?: number,
+  speed?:   number,
+  hUnc?:    number,
+  vUnc?:    number
 }
 ```
 
@@ -118,6 +145,23 @@ The derived tile carries the summarised confidence next to the depth:
 ```
 cell = { depthCm, count, bySource: {...}, minTime, maxTime, vUncCm?, zoc? }
 ```
+
+### 2.6 Why the profile, in bytes
+
+The offset is a small, unsigned, hull-scale quantity, so a single byte holds
+either value with room to spare:
+
+| Max offset     | Precision | Values | Bits |
+| -------------- | --------- | ------ | ---- |
+| 10 ft (3.05 m) | 1 cm      | 305    | 9    |
+| 8 ft (2.44 m)  | 1 cm      | 244    | 8    |
+| 10 m           | 5 cm      | 200    | 8    |
+| 10 ft (3.05 m) | 5 cm      | 61     | 6    |
+
+Stored raw on every sounding, the pair would cost 2 bytes (1 cm, ≤8 ft) to 2.25
+bytes packed (9 bits each) — as much as the depth itself (uint16 cm). As a
+versioned profile it costs two bytes **once per voyage**, and the soundings carry
+only a reference to it.
 
 ---
 
@@ -140,9 +184,11 @@ query fetches only the blocks it needs.
 
 ### 3.3 What replicates
 
-**Raw soundings, one signed append-only feed per vessel**, from which the tiles
-are derived as a shared view. This is what makes §2 possible — provenance is per
-sounding, and the tiles stay derived.
+**Raw soundings, one signed append-only feed per vessel — each reduced to depth
+below surface (§2.4) — plus that vessel's offset profiles.** The tiles are
+derived from those as a shared view. This is what makes §2 possible: every
+sounding arrives in one datum, so peers are directly comparable; provenance is
+per sounding; and the tiles stay derived.
 
 ### 3.4 Peers
 
