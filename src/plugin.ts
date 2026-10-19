@@ -35,6 +35,17 @@ export function readLengthOverall(app: ServerAPI): number | undefined {
     : undefined;
 }
 
+/** The vessel's beam, for the debug footprint overlay. `design.beam` is a leaf
+ * on most servers but read defensively in case it is a value node. */
+export function readVesselBeam(app: ServerAPI): number | undefined {
+  const node = app.getSelfPath("design.beam") as
+    number | { value?: number } | undefined;
+  const value = typeof node === "number" ? node : node?.value;
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
+}
+
 /** The server's GNSS antenna correction mode; `off` unless configured. */
 function readGnssCorrection(app: ServerAPI): string {
   // @ts-expect-error: app.config is not a public API
@@ -164,6 +175,13 @@ export default function createPlugin(app: ServerAPI): Plugin {
           () => ({
             depthPath: config ? `environment.depth.${config.path}` : undefined,
             transducer,
+            vessel: {
+              loa: readLengthOverall(app),
+              beam: readVesselBeam(app),
+            },
+            debug: {
+              vesselFootprint: config?.debug?.vesselFootprint === true,
+            },
           }),
         );
         routesRegistered = true;

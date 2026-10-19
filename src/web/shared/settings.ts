@@ -4,11 +4,18 @@
 
 export type DepthSource = "history" | "tiles";
 
+/** Overlay render quality. `auto` measures the worker's own frame cost and
+ * scales to a budget; the rest pin a scale, so a weak GPU (a laptop iGPU) can
+ * be dialled down and a fast one dialled up. */
+export type DepthQuality = "auto" | "high" | "balanced" | "low";
+
 export interface LiveDepthSettings {
   enabled: boolean;
   /** Where the soundings come from: the server's History API (the vessel's own
    * recent track) or the plugin's gridded bathymetry tiles. */
   source: DepthSource;
+  /** Overlay render quality (see {@link DepthQuality}). */
+  quality: DepthQuality;
   /** History look-back window, in hours. */
   historyWindowHours: number;
   /** History sample interval, in seconds. */
@@ -31,6 +38,7 @@ export interface LiveDepthSettings {
 export const DEFAULT_SETTINGS: LiveDepthSettings = {
   enabled: true,
   source: "history",
+  quality: "auto",
   historyWindowHours: 1,
   historyResolutionS: 0.1,
   shadeLimitMetres: 10,
@@ -40,6 +48,21 @@ export const DEFAULT_SETTINGS: LiveDepthSettings = {
   maxDepthMetres: 100,
   safetyDepthMetres: 3,
 };
+
+/** The render scale (fraction of the host's requested frame size) each fixed
+ * quality pins; `auto` is driven by the worker's own measurement instead. */
+export const QUALITY_SCALE: Record<Exclude<DepthQuality, "auto">, number> = {
+  high: 1,
+  balanced: 0.6,
+  low: 0.4,
+};
+
+/** The allowed values of the settings that are a closed set of strings. */
+const ENUM_VALUES: Partial<Record<keyof LiveDepthSettings, readonly string[]>> =
+  {
+    source: ["history", "tiles"],
+    quality: ["auto", "high", "balanced", "low"],
+  };
 
 /** The settings keys, with the bounds the config panel clamps to. */
 export const SETTINGS_BOUNDS: Partial<
@@ -67,9 +90,14 @@ export function mergeSettings(
     DEFAULT_SETTINGS,
   ) as (keyof LiveDepthSettings)[]) {
     const value = stored[key];
-    if (typeof value === typeof DEFAULT_SETTINGS[key]) {
-      (out[key] as unknown) = value;
+    if (typeof value !== typeof DEFAULT_SETTINGS[key]) {
+      continue;
     }
+    const allowed = ENUM_VALUES[key];
+    if (allowed && !allowed.includes(value as string)) {
+      continue;
+    }
+    (out[key] as unknown) = value;
   }
   return out;
 }

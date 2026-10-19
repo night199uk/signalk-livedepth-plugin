@@ -52,7 +52,7 @@ test("the toolbar button opens a panel declared here", () => {
   expect(panels[0].url.startsWith(ASSET_BASE)).toBe(true);
 });
 
-test("the overlay points at a declared settings panel and a pixel density", () => {
+test("the overlay points at a declared settings panel and the display's pixel density", () => {
   const m = buildManifest();
   const overlays = m.overlays as {
     configPanel?: string;
@@ -63,7 +63,9 @@ test("the overlay points at a declared settings panel and a pixel density", () =
   // button on its Chart-list row; one the host can't resolve is ignored.
   expect(overlays[0].configPanel).toBe("livedepth-settings");
   expect(panels.some((p) => p.id === overlays[0].configPanel)).toBe(true);
-  expect(overlays[0].preferredPixelRatio).toBeGreaterThan(0);
+  // No override: the host renders at the display's device pixel ratio (native),
+  // and the render-quality setting scales below that when the GPU needs it.
+  expect(overlays[0].preferredPixelRatio).toBeUndefined();
 });
 
 test("PLUGIN_ID names the extension resource key", () => {

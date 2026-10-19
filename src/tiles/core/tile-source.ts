@@ -30,6 +30,10 @@ export interface TileMeta {
    * the plugin corrects for it; absent or null otherwise. A client applies the
    * same shift to its own soundings so they match the served tiles. */
   transducer?: TransducerOffset | null;
+  /** Vessel dimensions, for the debug footprint overlay. */
+  vessel?: { loa?: number; beam?: number };
+  /** Temporary debug flags; see the plugin's debug config. */
+  debug?: { vesselFootprint?: boolean };
 }
 
 const RAD = Math.PI / 180;

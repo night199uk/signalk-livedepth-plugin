@@ -15,7 +15,12 @@
 // space, so a frame is a re-raster of the cached field — panning or zooming
 // never changes the surface (and the absolute-depth isobars stay put).
 
-import { buildDepthField, type DepthField } from "./shared/bathymetry.js";
+import {
+  createDepthFieldBuilder,
+  type CellRect,
+  type DepthField,
+  type DepthFieldBuilder,
+} from "./shared/bathymetry.js";
 import { DEPTH_FRAG_SRC, DEPTH_VERT_SRC } from "./shared/shaders.js";
 import {
   DEFAULT_COVERAGE_MIN_M,
@@ -25,13 +30,16 @@ import {
   SHADE_CONTOUR_LEVELS,
   depthClusters,
   depthCss,
+  latOf,
+  lonOf,
   mercX,
   mercY,
   selectShoals,
   shadeColor,
+  type DepthCluster,
   type DepthSample,
 } from "./shared/live-depth.js";
-import type { LiveDepthSettings } from "./shared/settings.js";
+import { QUALITY_SCALE, type LiveDepthSettings } from "./shared/settings.js";
 import type {
   RenderRequest,
   RenderWorkerIn,
@@ -51,11 +59,57 @@ const ORIGIN_SHIFT = Math.PI * 6378137;
 const WORLD_WIDTH = 2 * ORIGIN_SHIFT;
 
 let samples: DepthSample[] = [];
+/** The server-derived soundings, replaced as a whole on a base update. */
+let baseSamples: DepthSample[] = [];
+/** The own-vessel soundings folded in since, appended and never rebuilt. */
+let liveSamples: DepthSample[] = [];
 let settings: LiveDepthSettings | null = null;
-let field: DepthField | null = null;
+let builder: DepthFieldBuilder | null = null;
 let fieldDirty = true;
+/** The vessel's live position/heading + dimensions, for the debug footprint. */
+let vessel: {
+  position: [number, number] | null;
+  heading?: number;
+  loa?: number;
+  beam?: number;
+} = { position: null };
 /** The user's preferred depth unit (`"m"` or `"foot"`), for the labels. */
 let depthUnit = "m";
+
+/** Bumped whenever `samples` changes, so the overlay caches below recompute on
+ * a data change rather than on every render. */
+let samplesVersion = 0;
+/** The shoal samples and depth clusters, keyed on their inputs: a frame that
+ * only moves the view (or is a live tick with no new soundings) reuses them
+ * instead of re-aggregating every sample. */
+let shoalCache: { key: string; value: DepthSample[] } | null = null;
+let clusterCache: { key: string; value: DepthCluster[] } | null = null;
+
+/** Budget for one frame's worker work, in ms; `auto` scales the shaded surface
+ * to hold it. */
+const AUTO_FRAME_BUDGET_MS = 10;
+/** Frames between auto adjustments. Adjusting every frame makes the surface
+ * hunt (and the map shimmer); a couple of seconds apart lets it settle. */
+const AUTO_ADJUST_EVERY = 30;
+/** Frames between perf readouts to the runtime. */
+const PERF_REPORT_EVERY = 20;
+/** The scale `auto` has settled on; stepped occasionally. */
+let autoScale = 0.7;
+/** Rolling average of the frame cost, for a stable auto decision. */
+let frameAvgMs = 0;
+/** Frames since the last auto adjustment. */
+let framesSinceAdjust = 0;
+/** Frames since the last perf readout. */
+let perfFrames = 0;
+
+/** The shaded-surface scale for this frame: pinned by the quality setting, or
+ * the adaptive value in `auto`. Only the WebGL surface is drawn at this scale;
+ * the dots, clusters and labels are always drawn at full resolution, so the
+ * map stays readable and keeps every depth measurement. */
+function renderScale(): number {
+  const quality = settings?.quality ?? "auto";
+  return quality === "auto" ? autoScale : QUALITY_SCALE[quality];
+}
 
 /** A depth in the user's unit: whole feet, or a tenth of a metre. */
 function formatDepth(metres: number): string {
@@ -211,16 +265,43 @@ function uploadField(f: DepthField): void {
   );
 }
 
-/** Build the depth field from the data alone (fixed ground resolution over the
- * data's extent), so it is independent of the current view. */
-function buildField(): void {
-  field = null;
-  if (samples.length === 0 || !settings) return;
+/** Upload only the cells in `rect` (half-open), so folding a live sounding in
+ * costs a few rows of texture rather than the whole field. */
+function uploadRegion(f: DepthField, [x0, y0, x1, y1]: CellRect): void {
+  if (!gl || !depthTexture) return;
+  const w = x1 - x0;
+  const h = y1 - y0;
+  if (w <= 0 || h <= 0) return;
+  const gpu = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const src = (y0 + y) * f.width + x0;
+    const dst = y * w;
+    for (let x = 0; x < w; x++) {
+      const d = f.depth[src + x];
+      gpu[dst + x] = Number.isNaN(d) ? -1 : d;
+    }
+  }
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, depthTexture);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, x0, y0, w, h, gl.RED, gl.FLOAT, gpu);
+}
+
+/** Rebuild the field around the current base (a view change or a settings
+ * change), then fold the own-vessel soundings back in. This is the only path
+ * that pays for a whole-grid rebuild; a live flush just patches cells. */
+function rebuildField(): void {
+  builder = null;
+  samples = [...baseSamples, ...liveSamples];
+  // Size the grid off the server data, which covers the view; a live sounding
+  // outside it is clipped until the next base refresh rather than growing the
+  // grid (and forcing a rebuild) on every flush.
+  const source = baseSamples.length ? baseSamples : samples;
+  if (source.length === 0 || !settings) return;
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
-  for (const s of samples) {
+  for (const s of source) {
     const x = mercX(s.lon);
     const y = mercY(s.lat);
     minX = Math.min(minX, x);
@@ -241,17 +322,33 @@ function buildField(): void {
   // consecutive-gap estimate is meaningless; the target cell size is the field
   // resolution instead.
   const tiles = settings.source === "tiles";
-  const gap = tiles ? 0 : medianConsecutiveGap(samples);
+  const gap = tiles ? 0 : medianConsecutiveGap(source);
   const minCover = tiles ? 0 : DEFAULT_COVERAGE_MIN_M;
   const cell = Math.max(gap, extMax / MAX_FIELD_CELLS, minCover / 8, 0.01);
-  const built = buildDepthField(samples, extent, {
+  const next = createDepthFieldBuilder(extent, {
     cellMetres: cell,
     coverageMetres: Math.max(cell * 1.5, gap * 1.5),
     coverageMinMetres: minCover,
   });
-  if (!built) return;
-  field = built;
-  uploadField(built);
+  if (!next) return;
+  next.add(baseSamples);
+  if (liveSamples.length) next.add(liveSamples);
+  builder = next;
+  uploadField(next.field);
+}
+
+/** Fold new own-vessel soundings in, refreshing only the cells they reach. */
+function addLive(newSamples: DepthSample[]): void {
+  liveSamples.push(...newSamples);
+  samples.push(...newSamples);
+  samplesVersion++;
+  if (!builder) {
+    // No field yet (the base has not arrived): rebuild once it does.
+    fieldDirty = true;
+    return;
+  }
+  const rect = builder.add(newSamples);
+  if (rect) uploadRegion(builder.field, rect);
 }
 
 function renderGpu(
@@ -260,7 +357,7 @@ function renderGpu(
   canvasH: number,
   ratio: number,
 ): void {
-  const f = field;
+  const f = builder?.field;
   if (!gl || !f || !glCanvas) return;
   if (glCanvas.width !== canvasW || glCanvas.height !== canvasH) {
     glCanvas.width = canvasW;
@@ -350,17 +447,33 @@ function drawOverlay(
     ctx.fillText(text, p[0], p[1]);
   };
 
-  selectShoals(samples, settings.safetyDepthMetres).forEach((s) =>
-    dot(toPixel(s.lon, s.lat), s.depth),
-  );
+  // Recomputing these over every sample each frame is the worker's dominant
+  // cost; they depend only on the data and the settings (the cluster cell size
+  // also on the view resolution), so cache them and rebuild only on a key
+  // change — a frame that just moves the view reuses them.
+  const shoalKey = `${samplesVersion}:${settings.safetyDepthMetres}`;
+  if (!shoalCache || shoalCache.key !== shoalKey) {
+    shoalCache = {
+      key: shoalKey,
+      value: selectShoals(samples, settings.safetyDepthMetres),
+    };
+  }
+  shoalCache.value.forEach((s) => dot(toPixel(s.lon, s.lat), s.depth));
 
   const cellSize = Math.max(1, settings.cellPx * resolution);
-  const clusters = depthClusters(
-    samples,
-    cellSize,
-    settings.mergeTolerance,
-    settings.maxDepthMetres,
-  );
+  const clusterKey = `${samplesVersion}:${cellSize}:${settings.mergeTolerance}:${settings.maxDepthMetres}`;
+  if (!clusterCache || clusterCache.key !== clusterKey) {
+    clusterCache = {
+      key: clusterKey,
+      value: depthClusters(
+        samples,
+        cellSize,
+        settings.mergeTolerance,
+        settings.maxDepthMetres,
+      ),
+    };
+  }
+  const clusters = clusterCache.value;
   for (const c of clusters) {
     const p = toPixel(c.lon, c.lat);
     dot(p, c.depth);
@@ -373,6 +486,42 @@ function drawOverlay(
       label(formatDepth(c.depth), p, fontCss);
     }
   }
+
+  // Debug: the vessel's footprint (LOA × beam) centred on the reported position
+  // and rotated to the heading, so where a sounding lands relative to the hull
+  // can be seen. Off unless the plugin's debug config turns it on.
+  const v = vessel;
+  if (v.position && v.heading !== undefined && v.loa && v.beam) {
+    const cx = mercX(v.position[0]);
+    const cy = mercY(v.position[1]);
+    const cos = Math.cos(v.heading);
+    const sin = Math.sin(v.heading);
+    const halfLength = v.loa / 2;
+    const halfBeam = v.beam / 2;
+    const corners = (
+      [
+        [halfLength, halfBeam],
+        [halfLength, -halfBeam],
+        [-halfLength, -halfBeam],
+        [-halfLength, halfBeam],
+      ] as const
+    ).map(([fwd, stbd]) =>
+      toPixel(
+        lonOf(cx + fwd * sin + stbd * cos),
+        latOf(cy + fwd * cos - stbd * sin),
+      ),
+    );
+    ctx.beginPath();
+    corners.forEach(([px, py], i) =>
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py),
+    );
+    ctx.closePath();
+    ctx.lineWidth = Math.max(1.5, 1.5 * ratio);
+    ctx.strokeStyle = "rgba(255, 0, 255, 0.95)";
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255, 0, 255, 0.12)";
+    ctx.fill();
+  }
 }
 
 // ******** message handling ********
@@ -383,8 +532,8 @@ function render(req: RenderRequest): void {
       post({ type: "error", message: "WebGL2 unavailable" });
       return;
     }
-    if (fieldDirty || !field) {
-      buildField();
+    if (fieldDirty || !builder) {
+      rebuildField();
       fieldDirty = false;
     }
     const { extent, width, height, pixelRatio, resolution, zoom } = req;
@@ -394,6 +543,16 @@ function render(req: RenderRequest): void {
       extent[2],
       extent[3],
     ];
+    // Only the shaded WebGL surface is drawn at the quality scale (the shading
+    // is smooth, so it tolerates it). It is upscaled onto the frame, and the
+    // dots, clusters and labels are then drawn at full resolution on top — so
+    // every sounding stays sharp and the cluster cell size (which depends on
+    // the frame resolution) never coarsens. The frame stays exactly
+    // `width × height`, as the API requires.
+    const scale = renderScale();
+    const surfaceW = Math.max(1, Math.round(width * scale));
+    const surfaceH = Math.max(1, Math.round(height * scale));
+    const started = performance.now();
     const out = new OffscreenCanvas(width, height);
     const ctx = out.getContext("2d");
     if (!ctx) {
@@ -401,12 +560,42 @@ function render(req: RenderRequest): void {
       return;
     }
     ctx.clearRect(0, 0, width, height);
-    if (field) {
-      renderGpu(box, width, height, pixelRatio);
-      ctx.drawImage(glCanvas as unknown as CanvasImageSource, 0, 0);
+    if (builder) {
+      renderGpu(box, surfaceW, surfaceH, pixelRatio * scale);
+      ctx.drawImage(
+        glCanvas as unknown as CanvasImageSource,
+        0,
+        0,
+        surfaceW,
+        surfaceH,
+        0,
+        0,
+        width,
+        height,
+      );
     }
     drawOverlay(ctx, box, width, height, resolution, pixelRatio, zoom);
     const image = out.transferToImageBitmap();
+    const frameMs = performance.now() - started;
+    // Auto: smooth the cost and adjust only every few frames, with hysteresis,
+    // so the surface settles instead of hunting under the user. `drawImage`
+    // syncs the GL pass, so the window covers the real per-frame work.
+    if ((settings?.quality ?? "auto") === "auto") {
+      frameAvgMs =
+        frameAvgMs === 0 ? frameMs : frameAvgMs * 0.8 + frameMs * 0.2;
+      if (++framesSinceAdjust >= AUTO_ADJUST_EVERY) {
+        framesSinceAdjust = 0;
+        if (frameAvgMs > AUTO_FRAME_BUDGET_MS * 1.25) {
+          autoScale = Math.max(0.4, autoScale - 0.1);
+        } else if (frameAvgMs < AUTO_FRAME_BUDGET_MS * 0.6) {
+          autoScale = Math.min(1, autoScale + 0.1);
+        }
+      }
+    }
+    if (++perfFrames >= PERF_REPORT_EVERY) {
+      perfFrames = 0;
+      post({ type: "perf", scale, frameMs });
+    }
     post({ type: "frame", requestId: req.requestId, image }, [image]);
   } catch (err) {
     post({ type: "error", message: String(err) });
@@ -420,9 +609,16 @@ function post(message: RenderWorkerOut, transfer?: Transferable[]): void {
 self.onmessage = (e: MessageEvent<RenderWorkerIn>) => {
   const msg = e.data;
   switch (msg.type) {
-    case "samples":
-      samples = msg.samples;
+    case "base":
+      baseSamples = msg.samples;
       fieldDirty = true;
+      samplesVersion++;
+      break;
+    case "live":
+      addLive(msg.samples);
+      break;
+    case "vessel":
+      vessel = msg;
       break;
     case "settings":
       settings = msg.settings;

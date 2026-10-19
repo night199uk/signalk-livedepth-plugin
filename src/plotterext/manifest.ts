@@ -87,9 +87,10 @@ export function buildManifest(version = pluginVersion()): PlotterExtManifest {
         // layer's settings sit with the layer, not only behind the toolbar
         // button.
         configPanel: "livedepth-settings",
-        // Isobaths and labels want the pixels; the host still clamps to its own
-        // memory budget.
-        preferredPixelRatio: 2,
+        // No `preferredPixelRatio`: the host then uses the display's own device
+        // pixel ratio, which is native and sharp. Asking for 2 oversampled on a
+        // 1×/1.33× display, and that cost is paid per frame in the transfer and
+        // composite — the render-quality setting scales further if needed.
       },
     ],
   };

@@ -13,6 +13,7 @@ import {
   DEFAULT_SETTINGS,
   SETTINGS_BOUNDS,
   mergeSettings,
+  type DepthQuality,
   type DepthSource,
   type LiveDepthSettings,
 } from "./shared/settings.js";
@@ -233,6 +234,37 @@ function build(): void {
     "server-built bathymetry store, extended live.";
   source.appendChild(sourceHint);
   root.appendChild(source);
+
+  const quality = document.createElement("label");
+  quality.className = "field";
+  const qualityName = document.createElement("span");
+  qualityName.className = "name";
+  qualityName.textContent = "Render quality";
+  const qualitySelect = document.createElement("select");
+  for (const [value, label] of [
+    ["auto", "Auto (adapt to this GPU)"],
+    ["high", "High"],
+    ["balanced", "Balanced"],
+    ["low", "Low"],
+  ] as [DepthQuality, string][]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    option.selected = settings.quality === value;
+    qualitySelect.appendChild(option);
+  }
+  qualitySelect.addEventListener("change", () => {
+    settings.quality = qualitySelect.value as DepthQuality;
+    void save();
+  });
+  quality.append(qualityName, qualitySelect);
+  const qualityHint = document.createElement("span");
+  qualityHint.className = "hint";
+  qualityHint.textContent =
+    "Scales the shaded depth surface only; soundings, circles and labels " +
+    "always render at full resolution. Auto adapts to this GPU.";
+  quality.appendChild(qualityHint);
+  root.appendChild(quality);
 
   for (const field of FIELDS) {
     root.appendChild(numberField(field));

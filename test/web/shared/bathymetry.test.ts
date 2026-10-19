@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDepthField,
+  createDepthFieldBuilder,
   medianConsecutiveGap,
 } from "../../../src/web/shared/bathymetry.js";
 import type { DepthSample } from "../../../src/web/shared/live-depth.js";
@@ -13,6 +14,34 @@ const sample = (lon: number, lat: number, depth: number): DepthSample => ({
 
 // ~1 m of Web Mercator per 8.98e-6 degrees of longitude near the equator.
 const EXTENT = [-2000, -2000, 2000, 2000];
+
+describe("bathymetry createDepthFieldBuilder", () => {
+  // The live path adds soundings a few at a time, so the field it accumulates
+  // must be identical to building the whole thing in one pass.
+  it("matches a one-pass build when samples are added in batches", () => {
+    const first = [sample(0, 0, 10), sample(0.009, 0, 20)];
+    const later = [sample(0.0045, 0, 15)];
+    const options = { cellMetres: 500, coverageCells: 2, shallowBias: 0.3 };
+    const onePass = buildDepthField([...first, ...later], EXTENT, options)!;
+    const builder = createDepthFieldBuilder(EXTENT, options)!;
+    builder.add(first);
+    builder.add(later);
+    expect(Array.from(builder.field.depth)).toEqual(Array.from(onePass.depth));
+  });
+
+  it("reports only the block of cells a new sample reaches", () => {
+    const builder = createDepthFieldBuilder(EXTENT, {
+      cellMetres: 1000,
+      coverageCells: 1,
+    })!;
+    const rect = builder.add([sample(0, 0, 10)]);
+    expect(rect).not.toBeNull();
+    const [x0, y0, x1, y1] = rect!;
+    // a patch around the sample's cell, not the whole grid
+    expect(x1 - x0).toBeLessThan(builder.field.width);
+    expect(y1 - y0).toBeLessThan(builder.field.height);
+  });
+});
 
 describe("bathymetry buildDepthField", () => {
   it("is null for an unusable grid", () => {

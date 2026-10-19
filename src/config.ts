@@ -26,6 +26,11 @@ export type Config = {
     run?: boolean;
     resolution?: number;
   };
+  /** Temporary diagnostics, removed once the geometry is verified. */
+  debug?: {
+    /** Draw the vessel's footprint (LOA × beam) in the chart layer. */
+    vesselFootprint?: boolean;
+  };
 };
 
 export const DepthPaths = [
@@ -131,6 +136,21 @@ export function schema(app: ServerAPI) {
             title: "History resolution (seconds)",
             description:
               "Granularity to read. The provider floors this at its native cadence; 0.1 keeps nearly every fix.",
+          },
+        },
+      },
+      debug: {
+        type: "object",
+        title: "Debug",
+        description:
+          "Temporary diagnostics, not for general use — they will be removed.",
+        properties: {
+          vesselFootprint: {
+            type: "boolean",
+            default: false,
+            title: "Draw the vessel footprint",
+            description:
+              "Draw the vessel's footprint (design.length.overall × design.beam) on the chart layer, centred on navigation.position and rotated to the heading. Useful for checking where soundings land relative to the hull.",
           },
         },
       },

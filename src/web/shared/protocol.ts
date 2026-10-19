@@ -25,8 +25,22 @@ export interface RenderRequest {
 }
 
 export type RenderWorkerIn =
-  | { type: "samples"; samples: DepthSample[] }
+  /** The server-derived soundings (tiles or history), replacing the whole set;
+   * the field is rebuilt around these. */
+  | { type: "base"; samples: DepthSample[] }
+  /** New own-vessel soundings to fold in, appended to the base; only the cells
+   * they reach are refreshed, so a live flush never rebuilds the field. */
+  | { type: "live"; samples: DepthSample[] }
   | { type: "settings"; settings: LiveDepthSettings }
+  /** The vessel's live position/heading and dimensions, for the debug footprint
+   * overlay. Sent when the debug flag is on and any of these change. */
+  | {
+      type: "vessel";
+      position: [number, number] | null;
+      heading?: number;
+      loa?: number;
+      beam?: number;
+    }
   /** The user's preferred depth unit (`"m"` or `"foot"`), for the labels. */
   | { type: "units"; depth: string }
   | { type: "render"; req: RenderRequest }
@@ -34,4 +48,7 @@ export type RenderWorkerIn =
 
 export type RenderWorkerOut =
   | { type: "frame"; requestId: string; image: ImageBitmap }
+  /** Periodic readout of the overlay's render scale and worker cost, so the
+   * runtime can log the frame rate and how auto is settling. */
+  | { type: "perf"; scale: number; frameMs: number }
   | { type: "error"; message: string };

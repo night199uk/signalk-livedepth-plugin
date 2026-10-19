@@ -22,9 +22,6 @@ import {
 } from "./shared/settings.js";
 import type { RenderRequest, RenderWorkerOut } from "./shared/protocol.js";
 import {
-  createMemoryTileStore,
-  createTileAccumulator,
-  cellsToSamples,
   correctToTransducer,
   decodeTileSamples,
   tileRangeForBbox,
@@ -60,10 +57,13 @@ const worker = new Worker(new URL("./render-worker.js", import.meta.url), {
 let settings: LiveDepthSettings = { ...DEFAULT_SETTINGS };
 let transducer: TransducerOffset | null = null;
 let depthPath = DEFAULT_DEPTH_PATH;
+/** The vessel's dimensions and whether to draw the debug footprint, from the
+ * plugin's meta. */
+let vessel: { loa?: number; beam?: number } = {};
+let showFootprint = false;
 
-let samples: DepthSample[] = [];
-/** The server-derived soundings (tiles or history), without the client's live
- * extension — the base `compose()` folds the live cells onto. */
+/** The server-derived soundings (tiles or history); the worker folds the live
+ * own-vessel soundings onto these. */
 let baseSamples: DepthSample[] = [];
 let lastReq: RenderRequest | null = null;
 let busy = false;
@@ -79,13 +79,16 @@ let renderingLive = false;
 let liveInterval = 200;
 /** When the last live frame was sent, to pace the next. */
 let lastLiveAt = 0;
+/** The worker's last perf readout, for the frame-rate log. */
+let perfScale = 0;
+let perfFrameMs = 0;
+let framesSeen = 0;
+let framesSince = Date.now();
 let timer: ReturnType<typeof setTimeout> | undefined;
 
-// Client-side mirror of the tile store, extended from the live stream.
-let lastZoom = 0;
-let clientStore = createMemoryTileStore();
-let clientAccumulator = createTileAccumulator(clientStore);
-let liveDirty = false;
+// Own-vessel soundings buffered since the last flush, sent to the worker to be
+// folded into the field.
+let pendingLive: DepthSample[] = [];
 let liveFlushTimer: ReturnType<typeof setInterval> | undefined;
 
 // ******** settings ********
@@ -119,6 +122,9 @@ async function loadMeta(): Promise<void> {
     const meta = (await res.json()) as TileMeta;
     transducer = meta.transducer ?? null;
     if (meta.depthPath) depthPath = meta.depthPath;
+    vessel = meta.vessel ?? {};
+    showFootprint = meta.debug?.vesselFootprint === true;
+    publishVessel();
   } catch {
     // No plugin meta: the history source still works, uncorrected.
   }
@@ -171,7 +177,7 @@ async function fetchHistory(): Promise<void> {
     out.push({ lon, lat, depth: row.depth });
   }
   baseSamples = out;
-  compose();
+  publishBase();
 }
 
 async function fetchTiles(req: RenderRequest): Promise<void> {
@@ -182,7 +188,6 @@ async function fetchTiles(req: RenderRequest): Promise<void> {
     if (xs.length * ys.length <= MAX_TILE_FETCHES) break;
     zoom--;
   }
-  lastZoom = zoom;
   const { xs, ys } = tileRangeForBbox(req.bounds, zoom);
   const out: DepthSample[] = [];
   await Promise.all(
@@ -202,37 +207,7 @@ async function fetchTiles(req: RenderRequest): Promise<void> {
     ),
   );
   baseSamples = out;
-  compose();
-}
-
-/** The client store's live soundings for the current view, at the level the
- * view is drawn at. */
-function clientSamples(): DepthSample[] {
-  const bbox = lastReq?.bounds;
-  if (!bbox || !lastZoom) {
-    return [];
-  }
-  const { xs, ys } = tileRangeForBbox(bbox, lastZoom);
-  if (xs.length * ys.length > MAX_TILE_FETCHES) {
-    return [];
-  }
-  const out: DepthSample[] = [];
-  for (const x of xs) {
-    for (const y of ys) {
-      const cells = clientStore.read(lastZoom, x, y);
-      if (cells && cells.size) {
-        out.push(...cellsToSamples(lastZoom, x, y, cells));
-      }
-    }
-  }
-  return out;
-}
-
-/** The drawn soundings: the server data plus the live extension, composed
- * locally so a flush never needs a network round trip. */
-function compose(): void {
-  samples = [...baseSamples, ...clientSamples()];
-  publish();
+  publishBase();
 }
 
 function schedule(): void {
@@ -249,8 +224,10 @@ async function refresh(): Promise<void> {
   }
 }
 
-function publish(): void {
-  worker.postMessage({ type: "samples", samples });
+/** Hand the worker the server-derived soundings; it rebuilds the field around
+ * them. */
+function publishBase(): void {
+  worker.postMessage({ type: "base", samples: baseSamples });
   dirty = true;
   // A live frame for the last request, so the layer updates without a new one.
   if (lastReq) draw(true);
@@ -266,8 +243,24 @@ function startLive(): void {
     .subscribe(
       ["navigation.position", depthPath, "navigation.headingTrue"],
       (ev) => {
-        if (ev.path === "navigation.position" && Array.isArray(ev.value)) {
-          livePosition = ev.value as [number, number];
+        if (ev.path === "navigation.position") {
+          // The host relays the path's raw Signal K value, which is an object
+          // (`{ latitude, longitude }`); a host that normalises positions
+          // sends an array instead. Accept either, so a live sounding is never
+          // silently dropped over the shape.
+          const p = ev.value as
+            | [number, number]
+            | { longitude?: number; latitude?: number }
+            | null
+            | undefined;
+          if (Array.isArray(p)) {
+            livePosition = [p[0], p[1]];
+          } else if (
+            typeof p?.longitude === "number" &&
+            typeof p?.latitude === "number"
+          ) {
+            livePosition = [p.longitude, p.latitude];
+          }
         } else if (ev.path === depthPath && typeof ev.value === "number") {
           liveDepth = ev.value;
         } else if (
@@ -276,6 +269,7 @@ function startLive(): void {
         ) {
           liveHeading = ev.value;
         }
+        publishVessel();
         sampleLive();
       },
     )
@@ -298,20 +292,36 @@ let livePosition: [number, number] | null = null;
 let liveDepth: number | null = null;
 let liveHeading: number | undefined;
 
+/** Tell the worker the vessel's live position and heading, for the debug
+ * footprint overlay. A no-op unless the plugin's debug flag is on. */
+function publishVessel(): void {
+  if (!showFootprint) return;
+  worker.postMessage({
+    type: "vessel",
+    position: livePosition,
+    heading: liveHeading,
+    loa: vessel.loa,
+    beam: vessel.beam,
+  });
+  dirty = true;
+  if (lastReq) draw(true);
+}
+
 function sampleLive(): void {
   if (!livePosition || liveDepth === null) return;
   const { lon, lat } = correct(livePosition[0], livePosition[1], liveHeading);
-  clientAccumulator.add({ lon, lat, depth: liveDepth });
-  liveDirty = true;
+  pendingLive.push({ lon, lat, depth: liveDepth });
 }
 
 function flushLive(): void {
-  if (!liveDirty) return;
-  liveDirty = false;
-  clientAccumulator.flush();
-  // Fold the new soundings in locally — no tile re-fetch, so the live path is
-  // just the store write plus the render.
-  compose();
+  if (pendingLive.length === 0) return;
+  const live = pendingLive;
+  pendingLive = [];
+  // Fold the new soundings into the worker's field. No tile re-fetch, and the
+  // worker patches only the cells they reach, so a flush is cheap.
+  worker.postMessage({ type: "live", samples: live });
+  dirty = true;
+  if (lastReq) draw(true);
 }
 
 // ******** frame cycle ********
@@ -328,6 +338,11 @@ function draw(live = false): void {
 
 worker.onmessage = (e: MessageEvent<RenderWorkerOut>) => {
   const msg = e.data;
+  if (msg.type === "perf") {
+    perfScale = msg.scale;
+    perfFrameMs = msg.frameMs;
+    return;
+  }
   const req = rendering;
   const live = renderingLive;
   busy = false;
@@ -347,6 +362,18 @@ worker.onmessage = (e: MessageEvent<RenderWorkerOut>) => {
       image: msg.image,
     })
     .catch(() => {});
+  // A quick frame-rate readout, with the worker's current render scale, every
+  // few seconds — handy when tuning quality or measuring a GPU's headroom.
+  framesSeen++;
+  const now = Date.now();
+  if (now - framesSince >= 5000) {
+    const fps = (framesSeen * 1000) / (now - framesSince);
+    console.info(
+      `[LiveDepth] ${fps.toFixed(1)} frames/s · render scale ${perfScale.toFixed(2)} · worker ${perfFrameMs.toFixed(1)} ms/frame`,
+    );
+    framesSeen = 0;
+    framesSince = now;
+  }
   // A newer request arrived, or the data changed, while this frame rendered.
   if (dirty || lastReq !== req) draw(live);
 };
@@ -359,6 +386,10 @@ await client.subscribe(["overlay.request"], (_name, payload) => {
   if (typeof req.liveInterval === "number" && req.liveInterval > 0) {
     liveInterval = req.liveInterval;
   }
+  // The tiles are view-dependent: a settled pan/zoom needs the tiles covering
+  // its own bbox. Without this the layer keeps drawing the tile set fetched for
+  // the previous view, which is why panning showed only partial tracks.
+  if (settings.source === "tiles") schedule();
   draw();
 });
 

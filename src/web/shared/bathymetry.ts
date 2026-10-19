@@ -88,13 +88,26 @@ export function medianConsecutiveGap(
   return gaps[Math.floor(gaps.length / 2)];
 }
 
-/** Build a depth raster over `extent` (EPSG:3857 `[minX,minY,maxX,maxY]`) from
- * the samples, or null when there is nothing to draw or the grid is unusable. */
-export function buildDepthField(
-  samples: readonly DepthSample[],
+/** Cell indices a splat reached, as `[minX, minY, maxX, maxY]` (upper bounds
+ * exclusive). */
+export type CellRect = [number, number, number, number];
+
+/** A depth raster that can be extended a few samples at a time. The per-cell
+ * IDW weights are kept, so a live sounding patches just the cells it reaches
+ * instead of rebuilding the whole grid. */
+export interface DepthFieldBuilder {
+  readonly field: DepthField;
+  /** Splat `samples` into the field, refreshing the cells they reach. Returns
+   * the cell rect that changed (for a partial texture upload), or null. */
+  add(samples: readonly DepthSample[]): CellRect | null;
+}
+
+/** Create an empty field over `extent` (EPSG:3857 `[minX,minY,maxX,maxY]`), or
+ * null when the extent is unusable. Extend it with {@link DepthFieldBuilder.add}. */
+export function createDepthFieldBuilder(
   extent: readonly number[],
   options: BathymetryOptions,
-): DepthField | null {
+): DepthFieldBuilder | null {
   const cellMetres = options.cellMetres;
   if (
     !(cellMetres > 0) ||
@@ -148,59 +161,101 @@ export function buildDepthField(
   // Bound the per-sample splat; a huge radius would make the build quadratic.
   const radiusCells = Math.min(64, Math.ceil(coverageRadius / cellMetres));
 
-  for (const s of samples) {
-    if (
-      !Number.isFinite(s.lon) ||
-      !Number.isFinite(s.lat) ||
-      !Number.isFinite(s.depth) ||
-      s.depth < 0
-    ) {
-      continue;
+  const field: DepthField = { width, height, extent: gridExtent, depth };
+
+  /** Recompute `depth` over the half-open cell rect from the accumulated
+   * weights. */
+  function refresh([rx0, ry0, rx1, ry1]: CellRect): void {
+    for (let gy = ry0; gy < ry1; gy++) {
+      const row = gy * width;
+      for (let gx = rx0; gx < rx1; gx++) {
+        const i = row + gx;
+        const w = wsum[i];
+        if (w <= 0) {
+          depth[i] = NaN;
+          continue;
+        }
+        const idw = wdsum[i] / w;
+        const shallowest = minSeen[i];
+        // bias toward the shallowest sample in range, never deeper
+        depth[i] =
+          (1 - shallowBias) * idw + shallowBias * Math.min(idw, shallowest);
+      }
     }
-    const sx = mercX(s.lon);
-    const sy = mercY(s.lat);
-    const cx = Math.floor((sx - minX) / cellMetres);
-    const cy = Math.floor((sy - minY) / cellMetres);
-    for (let dy = -radiusCells; dy <= radiusCells; dy++) {
-      const gy = cy + dy;
-      if (gy < 0 || gy >= height) {
+  }
+
+  function add(samples: readonly DepthSample[]): CellRect | null {
+    let rect: CellRect | null = null;
+    const grow = (gx: number, gy: number) => {
+      if (!rect) {
+        rect = [gx, gy, gx + 1, gy + 1];
+        return;
+      }
+      if (gx < rect[0]) rect[0] = gx;
+      if (gy < rect[1]) rect[1] = gy;
+      if (gx + 1 > rect[2]) rect[2] = gx + 1;
+      if (gy + 1 > rect[3]) rect[3] = gy + 1;
+    };
+    for (const s of samples) {
+      if (
+        !Number.isFinite(s.lon) ||
+        !Number.isFinite(s.lat) ||
+        !Number.isFinite(s.depth) ||
+        s.depth < 0
+      ) {
         continue;
       }
-      const cellCenterY = minY + (gy + 0.5) * cellMetres;
-      const ddy = cellCenterY - sy;
-      for (let dx = -radiusCells; dx <= radiusCells; dx++) {
-        const gx = cx + dx;
-        if (gx < 0 || gx >= width) {
+      const sx = mercX(s.lon);
+      const sy = mercY(s.lat);
+      const cx = Math.floor((sx - minX) / cellMetres);
+      const cy = Math.floor((sy - minY) / cellMetres);
+      for (let dy = -radiusCells; dy <= radiusCells; dy++) {
+        const gy = cy + dy;
+        if (gy < 0 || gy >= height) {
           continue;
         }
-        const cellCenterX = minX + (gx + 0.5) * cellMetres;
-        const ddx = cellCenterX - sx;
-        const dist2 = ddx * ddx + ddy * ddy;
-        if (dist2 > coverage2) {
-          continue;
-        }
-        const idx = gy * width + gx;
-        const w = 1 / (Math.pow(dist2, power / 2) + 1e-6);
-        wsum[idx] += w;
-        wdsum[idx] += w * s.depth;
-        if (s.depth < minSeen[idx]) {
-          minSeen[idx] = s.depth;
+        const cellCenterY = minY + (gy + 0.5) * cellMetres;
+        const ddy = cellCenterY - sy;
+        for (let dx = -radiusCells; dx <= radiusCells; dx++) {
+          const gx = cx + dx;
+          if (gx < 0 || gx >= width) {
+            continue;
+          }
+          const cellCenterX = minX + (gx + 0.5) * cellMetres;
+          const ddx = cellCenterX - sx;
+          const dist2 = ddx * ddx + ddy * ddy;
+          if (dist2 > coverage2) {
+            continue;
+          }
+          const idx = gy * width + gx;
+          const w = 1 / (Math.pow(dist2, power / 2) + 1e-6);
+          wsum[idx] += w;
+          wdsum[idx] += w * s.depth;
+          if (s.depth < minSeen[idx]) {
+            minSeen[idx] = s.depth;
+          }
+          grow(gx, gy);
         }
       }
     }
+    if (rect) refresh(rect);
+    return rect;
   }
 
-  for (let i = 0; i < depth.length; i++) {
-    const w = wsum[i];
-    if (w <= 0) {
-      continue;
-    }
-    const idw = wdsum[i] / w;
-    const shallowest = minSeen[i];
-    // bias toward the shallowest sample in range, never deeper
-    depth[i] =
-      (1 - shallowBias) * idw + shallowBias * Math.min(idw, shallowest);
-  }
+  return { field, add };
+}
 
-  return { width, height, extent: gridExtent, depth };
+/** Build a depth raster over `extent` from the samples in one pass, or null
+ * when there is nothing to draw or the grid is unusable. */
+export function buildDepthField(
+  samples: readonly DepthSample[],
+  extent: readonly number[],
+  options: BathymetryOptions,
+): DepthField | null {
+  const builder = createDepthFieldBuilder(extent, options);
+  if (!builder) {
+    return null;
+  }
+  builder.add(samples);
+  return builder.field;
 }
