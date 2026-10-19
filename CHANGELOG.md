@@ -4,7 +4,7 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.2] - 2026-10-17
+## [0.3.2] - 2026-10-19
 
 ### Added
 
@@ -15,6 +15,31 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The transducer correction describes this vessel's hull, so it is applied to
   this vessel's soundings only. `vessels.include` / `vessels.exclude` narrow the
   set if needed.
+- A **Render quality** setting: Auto, or High / Balanced / Low. It scales only
+  the shaded depth surface; soundings, circles and labels always render at full
+  resolution. Auto adapts the surface to the GPU, and a frame-rate readout is
+  logged to the console.
+- A temporary `debug.vesselFootprint` option draws the vessel's LOA × beam on
+  the chart layer, for checking where a sounding lands relative to the hull.
+
+### Fixed
+
+- A transducer forward of midships is placed ahead of the reference, not behind
+  it. The offset sign was inverted, which drew every sounding astern.
+- The chart layer accepts the host's object-shaped `navigation.position`
+  (`{ latitude, longitude }`), so live soundings are no longer silently dropped.
+- Panning or zooming re-fetches the tiles for the new view; previously the layer
+  kept drawing the previous view's tile set.
+- A vessel that goes quiet keeps its subscription, so the deltas it replays on
+  reconnect are recorded rather than lost. A GPS-only vessel with no compass
+  falls back to course over ground for its heading.
+
+### Changed
+
+- The chart layer renders at the display's pixel ratio instead of oversampling
+  at 2×, caches the per-frame cluster aggregation, and patches the depth field
+  incrementally on a live flush instead of rebuilding the grid. This cuts the
+  browser's CPU/GPU cost substantially, especially on a lower-powered GPU.
 
 ## [0.3.1] - 2026-10-16
 
