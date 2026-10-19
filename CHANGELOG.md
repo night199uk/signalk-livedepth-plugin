@@ -4,6 +4,18 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-10-17
+
+### Added
+
+- Depth from **other vessels**. The plugin now records any vessel on the server
+  that publishes a depth on the selected datum, so a tender or a second
+  sounder-equipped vessel (for example a dinghy) is folded into the bathymetry
+  automatically. AIS targets — which have a position but no depth — are ignored.
+  The transducer correction describes this vessel's hull, so it is applied to
+  this vessel's soundings only. `vessels.include` / `vessels.exclude` narrow the
+  set if needed.
+
 ## [0.3.1] - 2026-10-16
 
 ### Fixed

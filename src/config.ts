@@ -14,6 +14,14 @@ export type Config = {
   /** Shift soundings from the vessel reference point the server reports to the
    * transducer. `off` leaves them where the server put them. */
   transducerCorrection: "off" | "replace";
+  /** Which vessels to record soundings from. By default every vessel that
+   * publishes a depth on the selected datum is recorded — a tender or a second
+   * sounder-equipped vessel is picked up automatically, while AIS targets
+   * (position but no depth) are ignored. `include`/`exclude` narrow that set. */
+  vessels?: {
+    include?: string[];
+    exclude?: string[];
+  };
   seed?: {
     run?: boolean;
     resolution?: number;
@@ -38,7 +46,7 @@ export function schema(app: ServerAPI) {
   return {
     type: "object",
     description:
-      "Build a gridded bathymetry tile store from the vessel's own position and depth, and serve it to a chart client's LiveDepth layer.",
+      "Build a gridded bathymetry tile store from vessel soundings — your own and any other depth-equipped vessel on the server — and serve it to a chart client's LiveDepth layer.",
     properties: {
       path: {
         type: "string",
@@ -82,6 +90,27 @@ export function schema(app: ServerAPI) {
         enum: ["off", "replace"],
         enumNames: ["Off", "Replace with the transducer's position"],
         default: "off",
+      },
+      vessels: {
+        type: "object",
+        title: "Vessels",
+        description:
+          "Which vessel contexts to record. By default every vessel that publishes a depth on the selected datum is recorded — a tender or a second depth-equipped vessel is picked up automatically, while AIS targets (position but no depth) are ignored. Use these lists to narrow that set.",
+        properties: {
+          include: {
+            type: "array",
+            title: "Only these vessels",
+            description:
+              "Record only these Signal K contexts, e.g. vessels.urn:mrn:signalk:uuid:…. Empty records every vessel that publishes a depth.",
+            items: { type: "string" },
+          },
+          exclude: {
+            type: "array",
+            title: "Never these vessels",
+            description: "Contexts to ignore even when they publish a depth.",
+            items: { type: "string" },
+          },
+        },
       },
       seed: {
         type: "object",

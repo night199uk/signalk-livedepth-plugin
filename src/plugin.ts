@@ -130,7 +130,7 @@ export default function createPlugin(app: ServerAPI): Plugin {
     id: "signalk-livedepth-plugin",
     name: "LiveDepth",
     description:
-      "Serve a gridded bathymetry tile store built from the vessel's own position and depth, for a chart plotter's LiveDepth layer.",
+      "Serve a gridded bathymetry tile store built from vessel soundings — your own and any other depth-equipped vessel on the server — for a chart plotter's LiveDepth layer.",
 
     async start(startConfig: Config, restart: (config: object) => void) {
       config = startConfig;
