@@ -50,7 +50,7 @@ function readGnssCorrection(app: ServerAPI): string {
  * position is the GNSS antenna, whose body position we do not know — so the
  * offset is meaningless. We still apply what the user configured, but flag it.
  */
-function resolveTransducerOffset(
+export function resolveTransducerOffset(
   app: ServerAPI,
   config: Config,
 ): TransducerOffset | undefined {
@@ -75,7 +75,9 @@ function resolveTransducerOffset(
     return undefined;
   }
   return {
-    forward: (config.sounder?.y ?? 0) - length / 2,
+    // `sounder.y` is the distance from the bow, so a transducer forward of
+    // midships sits at a smaller `y` and is a positive shift toward the bow.
+    forward: length / 2 - (config.sounder?.y ?? 0),
     starboard: config.sounder?.x ?? 0,
   };
 }
