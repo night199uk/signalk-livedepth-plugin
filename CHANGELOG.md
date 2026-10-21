@@ -4,6 +4,18 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-10-20
+
+### Added
+
+- **Ignore a nearby vessel's implausible depth.** A tender on its davits still
+  publishes a depth — its transducer is in air and the number often looks
+  plausible — and those soundings would otherwise be written next to the
+  mothership. A sounding is now skipped when its vessel is within
+  `coLocatedDepth.radiusM` (default 15 m) of us and its depth differs from ours
+  by more than `coLocatedDepth.depthM` (default 2 m). Our own soundings, and
+  those from vessels further away, are never filtered.
+
 ## [0.3.2] - 2026-10-19
 
 ### Added
