@@ -13,6 +13,8 @@ const config: Config = {
 const SELF = "urn:mrn:imo:mmsi:123456789";
 const DINGHY = "urn:mrn:signalk:uuid:67029419-1949-4e78-9b4b-b16bc683bc23";
 const AIS = "urn:mrn:imo:mmsi:999999999";
+const NEAR_OK = "urn:mrn:signalk:uuid:near-ok";
+const FAR = "urn:mrn:signalk:uuid:far-off";
 
 const iso = new Date().toISOString();
 const positionNode = (lon: number, lat: number) => ({
@@ -57,9 +59,9 @@ type Sub = {
   active: boolean;
 };
 
-function fakeApp() {
+function fakeApp(v: Record<string, unknown> = vessels) {
   const subs: Sub[] = [];
-  const model = structuredClone(vessels);
+  const model = structuredClone(v);
   const root = { vessels: model };
   const app = {
     getSelfPath: (path: string) => resolve(model[SELF], path),
@@ -264,4 +266,60 @@ test("applies the transducer offset only to this vessel", async () => {
   expect(fromDinghy).toMatchObject({ longitude: -1, latitude: 51 });
   // ...while self's is moved by its transducer offset.
   expect(fromSelf.longitude).not.toBe(1);
+});
+
+test("drops a co-located vessel's implausible depth (tender on davits)", async () => {
+  const now = new Date().toISOString();
+  const at = (lon: number, lat: number) => ({
+    value: { longitude: lon, latitude: lat },
+    timestamp: now,
+  });
+  const depthAt = (value: number) => ({ value, timestamp: now });
+
+  const model: Record<string, unknown> = {
+    [SELF]: {
+      uuid: SELF,
+      navigation: { position: at(-78.2543, 9.326) },
+      environment: { depth: { belowSurface: depthAt(14.4) } },
+    },
+    [DINGHY]: {
+      navigation: { position: at(-78.254298, 9.325976) }, // ~3 m from self
+      environment: { depth: { belowSurface: depthAt(4.5) } },
+    },
+    [NEAR_OK]: {
+      navigation: { position: at(-78.254302, 9.325978) }, // ~3 m, same water
+      environment: { depth: { belowSurface: depthAt(14.5) } },
+    },
+    [FAR]: {
+      navigation: { position: at(-78.25, 9.35) }, // kilometres away
+      environment: { depth: { belowSurface: depthAt(4.5) } },
+    },
+  };
+
+  const { app, subs } = fakeApp(model);
+  const stream = createLiveStream(app, config);
+  const out: BathymetryData[] = [];
+  stream.on("data", (data: BathymetryData) => out.push(data));
+
+  const feed = (context: string, value: number) =>
+    subs
+      .find((s) => s.context === `vessels.${context}`)!
+      .callback({
+        context: `vessels.${context}`,
+        updates: [
+          {
+            timestamp: now,
+            values: [{ path: "environment.depth.belowSurface", value }],
+          },
+        ],
+      } as unknown as Delta);
+
+  feed(DINGHY, 4.5); // beside us, 10 m shallower: not our water -> dropped
+  feed(NEAR_OK, 14.5); // beside us, same water -> kept
+  feed(FAR, 4.5); // far away -> kept regardless of depth
+
+  await tick();
+  expect(out.map((d) => d.context).sort()).toEqual(
+    [`vessels.${NEAR_OK}`, `vessels.${FAR}`].sort(),
+  );
 });

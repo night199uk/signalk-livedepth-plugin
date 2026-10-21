@@ -22,6 +22,15 @@ export type Config = {
     include?: string[];
     exclude?: string[];
   };
+  /** Skip a sounding from another vessel that is sitting next to us but
+   * reporting a depth that cannot be the water we are in — a tender on davits
+   * has its transducer in air and still reports a plausible-looking number.
+   * Compared against this vessel's own depth and position. */
+  coLocatedDepth?: {
+    enabled?: boolean;
+    radiusM?: number;
+    depthM?: number;
+  };
   seed?: {
     run?: boolean;
     resolution?: number;
@@ -114,6 +123,37 @@ export function schema(app: ServerAPI) {
             title: "Never these vessels",
             description: "Contexts to ignore even when they publish a depth.",
             items: { type: "string" },
+          },
+        },
+      },
+      coLocatedDepth: {
+        type: "object",
+        title: "Ignore a nearby vessel's implausible depth",
+        description:
+          "A tender on davits or in a cradle still reports a depth (its transducer is in air, and the number often looks plausible). While another vessel is within this distance of us and its depth differs from ours by more than the tolerance, its soundings are skipped. Our own soundings are never filtered.",
+        properties: {
+          enabled: {
+            type: "boolean",
+            default: true,
+            title: "Enabled",
+            description:
+              "Compare another vessel's depth with ours while it is close to us.",
+          },
+          radiusM: {
+            type: "number",
+            default: 15,
+            minimum: 0,
+            title: "Nearby radius (meters)",
+            description:
+              "Only a vessel this close to us is compared. Soundings further away are always kept.",
+          },
+          depthM: {
+            type: "number",
+            default: 2,
+            minimum: 0,
+            title: "Depth difference (meters)",
+            description:
+              "A depth this far from ours, while the vessel is nearby, is treated as out of the water and skipped.",
           },
         },
       },

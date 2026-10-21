@@ -90,6 +90,46 @@ export function createLiveStream(
   const readVessel = (context: string, path: string): unknown =>
     isSelf(context) ? app.getSelfPath(path) : app.getPath(`${context}.${path}`);
 
+  const coLocated = config.coLocatedDepth;
+  const coLocatedEnabled = coLocated?.enabled ?? true;
+  const coLocatedRadiusM = coLocated?.radiusM ?? 15;
+  const coLocatedDepthM = coLocated?.depthM ?? 2;
+  // How old our own position/depth may be to use as the reference.
+  const selfSourceTtlMs = 30_000;
+
+  /** True when another vessel is beside us reporting a depth that cannot be
+   * the water we are in — a tender on its davits, transducer in air, still
+   * emits a plausible-looking number. Our own soundings are never filtered. */
+  const implausibleBesideUs = (
+    context: string,
+    fix: { longitude: number; latitude: number },
+    depth: number,
+  ): boolean => {
+    if (!coLocatedEnabled || isSelf(context)) return false;
+    const now = Temporal.Now.instant();
+    const selfPositionNode = readVessel(selfContext, POSITION) as
+      PositionNode | undefined;
+    const selfPosition = positionOf(selfPositionNode);
+    if (
+      !selfPosition ||
+      !selfPositionNode?.timestamp ||
+      isStale(selfPositionNode, now, selfSourceTtlMs)
+    ) {
+      return false;
+    }
+    const selfDepthNode = readVessel(selfContext, depthPath) as
+      { value?: unknown; timestamp?: string } | undefined;
+    if (
+      typeof selfDepthNode?.value !== "number" ||
+      !selfDepthNode.timestamp ||
+      isStale({ timestamp: selfDepthNode.timestamp }, now, selfSourceTtlMs)
+    ) {
+      return false;
+    }
+    if (distanceM(fix, selfPosition) > coLocatedRadiusM) return false;
+    return Math.abs(depth - selfDepthNode.value) > coLocatedDepthM;
+  };
+
   // The last fix seen per vessel on the stream, so a sounding is paired with
   // the position it was recorded at — and a replayed (back-dated) sounding uses
   // the replayed position, not the vessel's current one.
@@ -155,6 +195,12 @@ export function createLiveStream(
         if (heading && isStale(heading, timestamp, ttl)) {
           app.debug("Stale heading data, discarding");
           heading = undefined;
+        }
+
+        if (implausibleBesideUs(context, fix, value as number)) {
+          return app.debug(
+            `Ignoring ${context} depth ${value} m: beside us but not our water`,
+          );
         }
 
         const vesselOffset = isSelf(context) ? offset : undefined;
@@ -242,4 +288,21 @@ function isStale(
     Temporal.Instant.from(object.timestamp).epochMilliseconds <
       timestamp.subtract({ milliseconds: ttl }).epochMilliseconds
   );
+}
+
+/** Great-circle distance between two positions, in metres. */
+function distanceM(
+  a: { longitude: number; latitude: number },
+  b: { longitude: number; latitude: number },
+): number {
+  const earth = 6371000;
+  const rad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = rad(b.latitude - a.latitude);
+  const dLon = rad(b.longitude - a.longitude);
+  const lat1 = rad(a.latitude);
+  const lat2 = rad(b.latitude);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * earth * Math.asin(Math.min(1, Math.sqrt(h)));
 }
