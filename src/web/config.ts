@@ -67,6 +67,12 @@ const FIELDS: Field[] = [
     depth: true,
   },
   {
+    key: "fillMetres",
+    label: "Fill radius",
+    hint: "How far a sounding fills water with no samples; measured cells keep their own depth.",
+    suffix: "m",
+  },
+  {
     key: "cellPx",
     label: "Grid cell",
     hint: "Circle diameter, in screen pixels.",

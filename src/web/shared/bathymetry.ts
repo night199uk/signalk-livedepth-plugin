@@ -3,9 +3,10 @@
  *
  * The data is one vessel's track, not a survey, so a cell is only filled where
  * a sounding is within `coverageCells`; gaps stay NaN (no coverage) rather than
- * being invented. Interpolation is Inverse Distance Weighting, biased toward
- * the shallowest sample in range by `shallowBias` (1 = never deeper than that
- * sample) so a smoothed surface can never overstate depth.
+ * being invented. The fill is a distance-weighted blend with a linear falloff,
+ * biased toward the shallowest sample in range by `shallowBias` (1 = never
+ * deeper than that sample) so a smoothed surface can never overstate depth;
+ * a contour (a sharp depth change) is then never smeared across by the fill.
  *
  * Pure functions (no Angular, no WebGL) so they can be unit tested directly.
  */
@@ -36,9 +37,15 @@ export interface BathymetryOptions {
    * this area, so an anchored vessel's jittered positions (clusters a fraction
    * of a metre apart) render as one patch rather than dozens of specks. */
   coverageMinMetres?: number;
-  /** Distance-weighting power (2 is the usual IDW choice). */
+  /** Falloff exponent: 1 = linear (default), higher concentrates the value
+   * nearer the sample. */
   power?: number;
-  /** 0 = pure IDW, 1 = never deeper than the shallowest sample in range. */
+  /** How far (metres) the fill may rise above the shallowest sample in range.
+   * A bigger change is a contour it must not cross, so a sharp depth change is
+   * capped rather than smeared over. */
+  contourMetres?: number;
+  /** 0 = pure distance blend, 1 = never deeper than the shallowest sample in
+   * range. */
   shallowBias?: number;
   /** Hard cap on either grid dimension, to bound memory and time. */
   maxCells?: number;
@@ -47,8 +54,9 @@ export interface BathymetryOptions {
 export const DEFAULT_COVERAGE_CELLS = 2;
 /** Floor for the coverage radius, in metres (see `coverageMinMetres`). */
 export const DEFAULT_COVERAGE_MIN_M = 2;
-export const DEFAULT_IDW_POWER = 2;
+export const DEFAULT_IDW_POWER = 1;
 export const DEFAULT_SHALLOW_BIAS = 0.5;
+export const DEFAULT_CONTOUR_M = 2;
 export const DEFAULT_MAX_CELLS = 1024;
 
 const EARTH_RADIUS = 6378137;
@@ -123,6 +131,7 @@ export function createDepthFieldBuilder(
     0,
     Math.min(1, options.shallowBias ?? DEFAULT_SHALLOW_BIAS),
   );
+  const contourMetres = options.contourMetres ?? DEFAULT_CONTOUR_M;
   const maxCells = options.maxCells ?? DEFAULT_MAX_CELLS;
 
   const width = Math.min(
@@ -177,12 +186,22 @@ export function createDepthFieldBuilder(
         }
         const idw = wdsum[i] / w;
         const shallowest = minSeen[i];
-        // bias toward the shallowest sample in range, never deeper
-        depth[i] =
+        // Bias toward the shallowest sample in range, then cap the result so
+        // the fill can never be more than `contourMetres` deeper than the
+        // shallowest measured sample: a sharp depth change is a contour the
+        // fill does not cross, while a gentle slope blends linearly.
+        const blended =
           (1 - shallowBias) * idw + shallowBias * Math.min(idw, shallowest);
+        depth[i] = Math.min(blended, shallowest + contourMetres);
       }
     }
   }
+
+  const isUsable = (s: DepthSample): boolean =>
+    Number.isFinite(s.lon) &&
+    Number.isFinite(s.lat) &&
+    Number.isFinite(s.depth) &&
+    s.depth >= 0;
 
   function add(samples: readonly DepthSample[]): CellRect | null {
     let rect: CellRect | null = null;
@@ -197,12 +216,7 @@ export function createDepthFieldBuilder(
       if (gy + 1 > rect[3]) rect[3] = gy + 1;
     };
     for (const s of samples) {
-      if (
-        !Number.isFinite(s.lon) ||
-        !Number.isFinite(s.lat) ||
-        !Number.isFinite(s.depth) ||
-        s.depth < 0
-      ) {
+      if (!isUsable(s)) {
         continue;
       }
       const sx = mercX(s.lon);
@@ -228,7 +242,12 @@ export function createDepthFieldBuilder(
             continue;
           }
           const idx = gy * width + gx;
-          const w = 1 / (Math.pow(dist2, power / 2) + 1e-6);
+          // Linear falloff: 1 at the sounding, 0 at the coverage edge. This
+          // spreads a sample into empty water over `coverageRadius` with a
+          // gradient rather than clustering the value around the nearest
+          // sample, so adjacent tracks blend linearly across the gap. `power`
+          // (default 1 = linear) shapes the ramp.
+          const w = Math.pow(1 - Math.sqrt(dist2) / coverageRadius, power);
           wsum[idx] += w;
           wdsum[idx] += w * s.depth;
           if (s.depth < minSeen[idx]) {

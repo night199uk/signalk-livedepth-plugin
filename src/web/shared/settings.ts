@@ -24,6 +24,11 @@ export interface LiveDepthSettings {
   shadeLimitMetres: number;
   /** Depth (metres) between isobaths. */
   contourIntervalMetres: number;
+  /** Radius (metres) over which a sounding fills water with no samples of its
+   * own, so a single pass paints a readable swath instead of a hairline track.
+   * Measured cells keep their own depth; the fill fades linearly to nothing at
+   * this radius. 0 disables the fill. */
+  fillMetres: number;
   /** Grid cell size in screen pixels; also the base label size. */
   cellPx: number;
   /** Fractional depth difference (0.15 = 15%) within which adjacent cells
@@ -43,6 +48,7 @@ export const DEFAULT_SETTINGS: LiveDepthSettings = {
   historyResolutionS: 0.1,
   shadeLimitMetres: 10,
   contourIntervalMetres: 1,
+  fillMetres: 6,
   cellPx: 24,
   mergeTolerance: 0.15,
   maxDepthMetres: 100,
@@ -72,6 +78,7 @@ export const SETTINGS_BOUNDS: Partial<
   historyResolutionS: { min: 0.01, max: 60, step: 0.01 },
   shadeLimitMetres: { min: 1, max: 200, step: 1 },
   contourIntervalMetres: { min: 0.5, max: 50, step: 0.5 },
+  fillMetres: { min: 0, max: 20, step: 1 },
   cellPx: { min: 4, max: 128, step: 1 },
   mergeTolerance: { min: 0, max: 1, step: 0.01 },
   maxDepthMetres: { min: 1, max: 500, step: 1 },

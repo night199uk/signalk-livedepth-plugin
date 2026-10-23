@@ -327,7 +327,9 @@ function rebuildField(): void {
   const cell = Math.max(gap, extMax / MAX_FIELD_CELLS, minCover / 8, 0.01);
   const next = createDepthFieldBuilder(extent, {
     cellMetres: cell,
-    coverageMetres: Math.max(cell * 1.5, gap * 1.5),
+    // `gap` bridges the along-track gaps, the fill radius widens a sounding
+    // into empty water, and a sounding always covers its own cell.
+    coverageMetres: Math.max(cell * 1.5, gap * 1.5, settings.fillMetres),
     coverageMinMetres: minCover,
   });
   if (!next) return;

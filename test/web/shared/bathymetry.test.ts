@@ -2,9 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   buildDepthField,
   createDepthFieldBuilder,
+  DEFAULT_CONTOUR_M,
   medianConsecutiveGap,
 } from "../../../src/web/shared/bathymetry.js";
-import type { DepthSample } from "../../../src/web/shared/live-depth.js";
+import {
+  mercX,
+  mercY,
+  type DepthSample,
+} from "../../../src/web/shared/live-depth.js";
 
 const sample = (lon: number, lat: number, depth: number): DepthSample => ({
   lon,
@@ -156,5 +161,47 @@ describe("bathymetry sample spacing", () => {
       coverageCells: 2,
     });
     expect(Number.isNaN(floored.depth[20 * 40 + 23])).toBe(false);
+  });
+
+  it("spreads a sounding over a wider fill radius, keeping its own cell exact", () => {
+    const extent = [-1000, -1000, 1000, 1000];
+    const i = 10 * 20 + 15; // a cell ~550 m east of the sounding's cell
+    const narrow = buildDepthField([sample(0, 0, 10)], extent, {
+      cellMetres: 100,
+      coverageMetres: 300,
+      coverageMinMetres: 0,
+    });
+    const wide = buildDepthField([sample(0, 0, 10)], extent, {
+      cellMetres: 100,
+      coverageMetres: 600,
+      coverageMinMetres: 0,
+    });
+    expect(Number.isNaN(narrow.depth[i])).toBe(true);
+    expect(Number.isNaN(wide.depth[i])).toBe(false);
+    // the cell the sounding lands in holds its exact depth
+    expect(wide.depth[10 * 20 + 10]).toBe(10);
+  });
+
+  it("does not spread one depth across a contour", () => {
+    const extent = [-100, -100, 100, 100];
+    const shallow = sample(0, 0, 5);
+    const deep = sample(0.00008983, 0, 20); // ~10 m east
+    const f = buildDepthField([shallow, deep], extent, {
+      cellMetres: 1,
+      coverageMetres: 30,
+      shallowBias: 0,
+    })!;
+    const row = Math.floor((mercY(0) - extent[1]) / 1);
+    const ax = Math.floor((mercX(0) - extent[0]) / 1);
+    const bx = Math.floor((mercX(0.00008983) - extent[0]) / 1);
+    // The shallow sounding's cell is capped near its depth: the deep fill can
+    // deepen it by no more than the contour tolerance, never across to 20.
+    expect(f.depth[row * f.width + ax]).toBeLessThanOrEqual(
+      5 + DEFAULT_CONTOUR_M + 1e-6,
+    );
+    // Water between them blends linearly.
+    const mid = f.depth[row * f.width + Math.floor((ax + bx) / 2)];
+    expect(mid).toBeGreaterThan(5);
+    expect(mid).toBeLessThan(20);
   });
 });
