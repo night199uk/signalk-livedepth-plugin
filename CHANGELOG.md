@@ -4,6 +4,16 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-10-23
+
+### Added
+
+- **Vector contours**, so the isobars stay crisp at any zoom (the vector-tile
+  look) instead of being limited by the depth-field raster. The shaded surface
+  can render at **full resolution** (ignoring the quality scale) and with
+  **MSAA**. Advanced controls in the settings panel: full-resolution surface,
+  vector contours, smooth edges, field resolution, and contour width.
+
 ## [0.3.4] - 2026-10-21
 
 ### Added
