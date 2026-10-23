@@ -510,6 +510,8 @@ function drawOverlay(
     ctx.fillText(text, p[0], p[1]);
   };
 
+  drawContours(ctx, box, canvasW, canvasH, ratio);
+
   // Recomputing these over every sample each frame is the worker's dominant
   // cost; they depend only on the data and the settings (the cluster cell size
   // also on the view resolution), so cache them and rebuild only on a key
