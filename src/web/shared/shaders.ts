@@ -35,6 +35,7 @@ uniform float uShadeLimit;
 uniform int uLevels;
 uniform float uInterval;
 uniform float uLineWidth;
+uniform float uIsobars;   // 1 = per-fragment isobars, 0 = vector contours drawn by the runtime
 bool uncov(float v) { return v < 0.0; } // -1: no coverage
 float sampleDepth(vec2 uv) {
   vec2 fc = uv / uTexel - 0.5;
@@ -65,11 +66,15 @@ void main() {
     float tCenter = (band + 0.5) / float(uLevels);
     fill = texture(uLut, vec2(clamp(tCenter, 0.0, 1.0), 0.5)).rgb;
   }
-  // Isobars at every absolute multiple of the interval, over ALL data.
-  float ci = d / uInterval;
-  float dv = min(fract(ci), 1.0 - fract(ci));
-  float px = dv / max(fwidth(ci), 1e-6);
-  float line = 1.0 - smoothstep(uLineWidth, uLineWidth + 1.5, px);
+  // Isobars at every absolute multiple of the interval, over ALL data. The
+  // runtime can disable these and draw vector contours instead.
+  float line = 0.0;
+  if (uIsobars > 0.5) {
+    float ci = d / uInterval;
+    float dv = min(fract(ci), 1.0 - fract(ci));
+    float px = dv / max(fwidth(ci), 1e-6);
+    line = 1.0 - smoothstep(uLineWidth, uLineWidth + 1.5, px);
+  }
   vec3 col = mix(fill, vec3(0.0), line);
   float alpha = max(line, shaded ? 1.0 : 0.0);
   fragColor = vec4(col, alpha);

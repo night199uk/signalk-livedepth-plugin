@@ -16,6 +16,19 @@ export interface LiveDepthSettings {
   source: DepthSource;
   /** Overlay render quality (see {@link DepthQuality}). */
   quality: DepthQuality;
+  /** Render the shaded surface at the host's full requested size, ignoring the
+   * render-quality scale. */
+  fullResolution: boolean;
+  /** Draw isobars as vector polylines (crisp at any zoom) instead of the
+   * per-fragment raster approximation. */
+  vectorContours: boolean;
+  /** Antialias the WebGL surface, so the coverage/discard edges are smooth. */
+  msaa: boolean;
+  /** Cap on either depth-field dimension. Higher resolves finer contours at the
+   * cost of memory and build time. */
+  fieldCells: number;
+  /** Vector isobar line width, in screen pixels. */
+  contourWidthPx: number;
   /** History look-back window, in hours. */
   historyWindowHours: number;
   /** History sample interval, in seconds. */
@@ -44,6 +57,11 @@ export const DEFAULT_SETTINGS: LiveDepthSettings = {
   enabled: true,
   source: "history",
   quality: "auto",
+  fullResolution: true,
+  vectorContours: true,
+  msaa: true,
+  fieldCells: 1024,
+  contourWidthPx: 1.5,
   historyWindowHours: 1,
   historyResolutionS: 0.1,
   shadeLimitMetres: 10,
@@ -80,6 +98,8 @@ export const SETTINGS_BOUNDS: Partial<
   contourIntervalMetres: { min: 0.5, max: 50, step: 0.5 },
   fillMetres: { min: 0, max: 20, step: 1 },
   cellPx: { min: 4, max: 128, step: 1 },
+  fieldCells: { min: 256, max: 4096, step: 256 },
+  contourWidthPx: { min: 0.5, max: 6, step: 0.5 },
   mergeTolerance: { min: 0, max: 1, step: 0.01 },
   maxDepthMetres: { min: 1, max: 500, step: 1 },
   safetyDepthMetres: { min: 0, max: 50, step: 0.5 },

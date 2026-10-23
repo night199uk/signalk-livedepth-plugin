@@ -95,6 +95,42 @@ const FIELDS: Field[] = [
     hint: "Samples at or below this depth are marked individually.",
     depth: true,
   },
+  {
+    key: "fieldCells",
+    label: "Field resolution",
+    hint: "Depth-field cells across the view; higher resolves finer contours.",
+  },
+  {
+    key: "contourWidthPx",
+    label: "Contour width",
+    hint: "Vector isobar line width.",
+    suffix: "px",
+  },
+];
+
+interface Toggle {
+  key: keyof LiveDepthSettings;
+  label: string;
+  hint: string;
+}
+
+/** Boolean quality switches, rendered as checkboxes. */
+const TOGGLES: Toggle[] = [
+  {
+    key: "fullResolution",
+    label: "Full-resolution surface",
+    hint: "Draw the shaded surface at the display's full size instead of the quality scale (like crowd-depth).",
+  },
+  {
+    key: "vectorContours",
+    label: "Vector contours",
+    hint: "Draw isobars as vector lines, crisp at any zoom, instead of the per-fragment approximation.",
+  },
+  {
+    key: "msaa",
+    label: "Smooth edges (MSAA)",
+    hint: "Antialias the WebGL surface edges; applied on the next frame.",
+  },
 ];
 
 const unitSymbol = () => (depthUnit === "foot" ? "ft" : "m");
@@ -187,6 +223,29 @@ function numberField(field: Field): HTMLElement {
   return wrap;
 }
 
+function toggleField(toggle: Toggle): HTMLElement {
+  const wrap = document.createElement("label");
+  wrap.className = "field row";
+  const name = document.createElement("span");
+  name.className = "name";
+  name.textContent = toggle.label;
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.checked = Boolean(settings[toggle.key]);
+  input.addEventListener("change", () => {
+    (settings[toggle.key] as unknown as boolean) = input.checked;
+    void save();
+  });
+  wrap.append(name, input);
+  if (toggle.hint) {
+    const hint = document.createElement("span");
+    hint.className = "hint";
+    hint.textContent = toggle.hint;
+    wrap.appendChild(hint);
+  }
+  return wrap;
+}
+
 function build(): void {
   root.replaceChildren();
   historyRows.length = 0;
@@ -271,6 +330,10 @@ function build(): void {
     "always render at full resolution. Auto adapts to this GPU.";
   quality.appendChild(qualityHint);
   root.appendChild(quality);
+
+  for (const toggle of TOGGLES) {
+    root.appendChild(toggleField(toggle));
+  }
 
   for (const field of FIELDS) {
     root.appendChild(numberField(field));

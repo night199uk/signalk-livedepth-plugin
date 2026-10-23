@@ -22,6 +22,7 @@ import {
   type DepthFieldBuilder,
 } from "./shared/bathymetry.js";
 import { DEPTH_FRAG_SRC, DEPTH_VERT_SRC } from "./shared/shaders.js";
+import { extractContours, type ContourSegment } from "./shared/contours.js";
 import {
   DEFAULT_COVERAGE_MIN_M,
   medianConsecutiveGap,
@@ -84,6 +85,10 @@ let samplesVersion = 0;
  * instead of re-aggregating every sample. */
 let shoalCache: { key: string; value: DepthSample[] } | null = null;
 let clusterCache: { key: string; value: DepthCluster[] } | null = null;
+/** Vector contour segments for the current field, in world metres. */
+let contours: ContourSegment[] = [];
+/** The MSAA setting the live GL context was created with. */
+let gpuMsaa = true;
 
 /** Budget for one frame's worker work, in ms; `auto` scales the shaded surface
  * to hold it. */
@@ -107,6 +112,9 @@ let perfFrames = 0;
  * the dots, clusters and labels are always drawn at full resolution, so the
  * map stays readable and keeps every depth measurement. */
 function renderScale(): number {
+  // Full-resolution renders the surface at the host's requested size, ignoring
+  // the quality scale (crowd-depth parity).
+  if (settings?.fullResolution) return 1;
   const quality = settings?.quality ?? "auto";
   return quality === "auto" ? autoScale : QUALITY_SCALE[quality];
 }
@@ -136,6 +144,7 @@ let uShadeLimit: WebGLUniformLocation | null = null;
 let uLevels: WebGLUniformLocation | null = null;
 let uInterval: WebGLUniformLocation | null = null;
 let uLineWidth: WebGLUniformLocation | null = null;
+let uIsobars: WebGLUniformLocation | null = null;
 
 function compile(
   ctx: WebGL2RenderingContext,
@@ -156,11 +165,14 @@ function compile(
 function initWebgl(): boolean {
   if (gl) return true;
   glCanvas = new OffscreenCanvas(1, 1);
+  const msaa = settings?.msaa ?? true;
   const ctx = glCanvas.getContext("webgl2", {
     alpha: true,
     premultipliedAlpha: true,
+    antialias: msaa,
   }) as WebGL2RenderingContext | null;
   if (!ctx) return false;
+  gpuMsaa = msaa;
   const vs = compile(ctx, ctx.VERTEX_SHADER, DEPTH_VERT_SRC);
   const fs = compile(ctx, ctx.FRAGMENT_SHADER, DEPTH_FRAG_SRC);
   const prog = ctx.createProgram();
@@ -182,6 +194,7 @@ function initWebgl(): boolean {
   uLevels = ctx.getUniformLocation(prog, "uLevels");
   uInterval = ctx.getUniformLocation(prog, "uInterval");
   uLineWidth = ctx.getUniformLocation(prog, "uLineWidth");
+  uIsobars = ctx.getUniformLocation(prog, "uIsobars");
 
   quad = ctx.createBuffer();
   ctx.bindBuffer(ctx.ARRAY_BUFFER, quad);
@@ -324,9 +337,14 @@ function rebuildField(): void {
   const tiles = settings.source === "tiles";
   const gap = tiles ? 0 : medianConsecutiveGap(source);
   const minCover = tiles ? 0 : DEFAULT_COVERAGE_MIN_M;
-  const cell = Math.max(gap, extMax / MAX_FIELD_CELLS, minCover / 8, 0.01);
+  const maxCells = Math.max(
+    64,
+    Math.round(settings.fieldCells) || MAX_FIELD_CELLS,
+  );
+  const cell = Math.max(gap, extMax / maxCells, minCover / 8, 0.01);
   const next = createDepthFieldBuilder(extent, {
     cellMetres: cell,
+    maxCells,
     // `gap` bridges the along-track gaps, the fill radius widens a sounding
     // into empty water, and a sounding always covers its own cell.
     coverageMetres: Math.max(cell * 1.5, gap * 1.5, settings.fillMetres),
@@ -337,6 +355,15 @@ function rebuildField(): void {
   if (liveSamples.length) next.add(liveSamples);
   builder = next;
   uploadField(next.field);
+  // Trace the vector isobars once per (re)build. Live soundings update the
+  // surface immediately; the contours catch up on the next base fetch.
+  contours = settings.vectorContours
+    ? extractContours(
+        next.field,
+        Math.max(0.01, settings.contourIntervalMetres),
+        Math.max(0, settings.maxDepthMetres),
+      )
+    : [];
 }
 
 /** Fold new own-vessel soundings in, refreshing only the cells they reach. */
@@ -397,6 +424,7 @@ function renderGpu(
   gl.uniform1i(uLevels, SHADE_CONTOUR_LEVELS);
   gl.uniform1f(uInterval, Math.max(0.01, settings?.contourIntervalMetres ?? 1));
   gl.uniform1f(uLineWidth, Math.max(1, ratio));
+  gl.uniform1f(uIsobars, settings?.vectorContours ? 0 : 1);
 
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
   gl.enableVertexAttribArray(aPos);
@@ -405,6 +433,39 @@ function renderGpu(
 }
 
 // ******** 2D overlay (dots + labels) ********
+
+/** Draw the vector isobars (traced from the field) on the 2D overlay. */
+function drawContours(
+  ctx: OffscreenCanvasRenderingContext2D,
+  box: readonly [number, number, number, number],
+  canvasW: number,
+  canvasH: number,
+  ratio: number,
+): void {
+  if (!settings?.vectorContours) return;
+  const f = builder?.field;
+  if (!f || contours.length === 0) return;
+  const boxW = box[2] - box[0];
+  const boxH = box[3] - box[1];
+  if (!(boxW > 0) || !(boxH > 0)) return;
+  // Match the surface's world copy (see renderGpu).
+  const ext = f.extent;
+  const shift =
+    Math.round(((ext[0] + ext[2]) / 2 - (box[0] + box[2]) / 2) / WORLD_WIDTH) *
+    WORLD_WIDTH;
+  const px = (x: number) => ((x + shift - box[0]) / boxW) * canvasW;
+  const py = (y: number) => ((box[3] - y) / boxH) * canvasH;
+  ctx.beginPath();
+  for (const [x0, y0, x1, y1] of contours) {
+    ctx.moveTo(px(x0), py(y0));
+    ctx.lineTo(px(x1), py(y1));
+  }
+  ctx.lineWidth = Math.max(1, (settings.contourWidthPx ?? 1.5) * ratio);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+  ctx.stroke();
+}
 
 function drawOverlay(
   ctx: OffscreenCanvasRenderingContext2D,
@@ -622,10 +683,14 @@ self.onmessage = (e: MessageEvent<RenderWorkerIn>) => {
     case "vessel":
       vessel = msg;
       break;
-    case "settings":
+    case "settings": {
+      // MSAA is fixed when the GL context is created; drop it so the next
+      // render recreates it with the new setting.
+      if (msg.settings.msaa !== gpuMsaa) releaseGpu();
       settings = msg.settings;
       fieldDirty = true;
       break;
+    }
     case "units":
       depthUnit = msg.depth;
       break;
