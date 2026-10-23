@@ -4,6 +4,17 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-10-21
+
+### Added
+
+- **Wider depth fill.** A sounding now fills water it has no samples for, out
+  to a configurable **Fill radius** (default 6 m), with a linear gradient so
+  adjacent tracks blend across the gap instead of leaving a hairline track that
+  takes many passes to fill in. The cell a sounding lands in keeps its own
+  depth, and the fill is capped a couple of metres above the shallowest sample
+  in range, so a sharp depth change (a contour) is not smeared over.
+
 ## [0.3.3] - 2026-10-20
 
 ### Added
