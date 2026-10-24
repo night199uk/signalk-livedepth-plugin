@@ -7,6 +7,7 @@ import {
   depthClusters,
   depthColor,
   depthCss,
+  dotCss,
   historyValuesQuery,
   mergeDepthCells,
   MERGE_MAX_RADIUS_CELLS,
@@ -45,6 +46,12 @@ describe("live-depth shade palette", () => {
 
   it("renders a CSS colour with the requested alpha", () => {
     expect(depthCss(0, 10, 0.5)).toBe("rgba(37,175,248,0.5)");
+  });
+
+  it("keeps a deep sounding dot visible past the shade limit", () => {
+    // the surface ramp is white at/after the limit; a dot must not be
+    expect(dotCss(20, 10)).toBe("rgba(183,223,248,1)");
+    expect(dotCss(3, 10)).not.toBe(dotCss(20, 10));
   });
 });
 

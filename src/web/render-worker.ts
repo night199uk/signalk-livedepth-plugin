@@ -35,6 +35,7 @@ import {
   SHADE_CONTOUR_LEVELS,
   depthClusters,
   depthCss,
+  dotCss,
   latOf,
   lonOf,
   mercX,
@@ -519,7 +520,7 @@ function drawOverlay(
       0,
       Math.PI * 2,
     );
-    ctx.fillStyle = depthCss(depth, settings!.shadeLimitMetres, 0.95);
+    ctx.fillStyle = dotCss(depth, settings!.shadeLimitMetres, 0.95);
     ctx.fill();
   };
   const label = (text: string, p: [number, number], fontCss: number) => {
