@@ -177,8 +177,6 @@ type GraphicsItem =
 const GRAPHICS: GraphicsItem[] = [
   { kind: "quality" },
   { kind: "toggle", key: "vectorContours" },
-  { kind: "field", key: "contourIntervalMetres" },
-  { kind: "field", key: "minorContourMetres" },
   { kind: "field", key: "contourWidthPx" },
   { kind: "field", key: "minorContourWidthPx" },
   { kind: "color", key: "majorContourColor" },
