@@ -4,6 +4,16 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.11] - 2026-10-24
+
+### Changed
+
+- **Cached surface and overlay.** The host requests a frame far more often than
+  the depth field or the view changes; the worker now reuses the rendered
+  surface and the drawn overlay until a key (field version, extent, size,
+  settings) changes, instead of re-running the full-screen shader and the 2D
+  pass on every request.
+
 ## [0.3.10] - 2026-10-24
 
 ### Changed

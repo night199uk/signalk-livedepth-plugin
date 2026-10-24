@@ -71,6 +71,16 @@ let liveSamples: DepthSample[] = [];
 let settings: LiveDepthSettings | null = null;
 let builder: DepthFieldBuilder | null = null;
 let fieldDirty = true;
+/** Bumped whenever the depth texture changes, so the cached surface is rebuilt. */
+let fieldVersion = 0;
+/** Last rendered surface (WebGL) and 2D overlay, keyed on everything that
+ * affects them. Reusing them skips the per-pixel shader and the overlay's
+ * canvas work on requests where nothing changed (the host asks for a frame
+ * far more often than the field or the view changes). */
+let surfaceCache: { key: string; image: ImageBitmap } | null = null;
+let overlayCache: { key: string; image: ImageBitmap } | null = null;
+let overlayCanvas: OffscreenCanvas | null = null;
+let overlayCtx: OffscreenCanvasRenderingContext2D | null = null;
 /** The vessel's live position/heading + dimensions, for the debug footprint. */
 let vessel: {
   position: [number, number] | null;
@@ -255,6 +265,12 @@ function releaseGpu(): void {
   depthTexture = null;
   lutTexture = null;
   glCanvas = null;
+  surfaceCache?.image.close();
+  surfaceCache = null;
+  overlayCache?.image.close();
+  overlayCache = null;
+  overlayCanvas = null;
+  overlayCtx = null;
 }
 
 function uploadField(f: DepthField): void {
@@ -280,6 +296,7 @@ function uploadField(f: DepthField): void {
     gl.FLOAT,
     gpu,
   );
+  fieldVersion++;
 }
 
 /** Upload only the cells in `rect` (half-open), so folding a live sounding in
@@ -301,6 +318,7 @@ function uploadRegion(f: DepthField, [x0, y0, x1, y1]: CellRect): void {
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, depthTexture);
   gl.texSubImage2D(gl.TEXTURE_2D, 0, x0, y0, w, h, gl.RED, gl.FLOAT, gpu);
+  fieldVersion++;
 }
 
 /** Rebuild the field around the current base (a view change or a settings
@@ -647,10 +665,30 @@ function render(req: RenderRequest): void {
       return;
     }
     ctx.clearRect(0, 0, width, height);
-    if (builder) {
-      renderGpu(box, surfaceW, surfaceH, pixelRatio * scale);
+    let redrew = false;
+    if (builder && glCanvas) {
+      const surfaceKey = [
+        fieldVersion,
+        box.join(","),
+        surfaceW,
+        surfaceH,
+        pixelRatio,
+        settings?.shadeLimitMetres,
+        settings?.contourIntervalMetres,
+        settings?.vectorContours,
+        settings?.msaa,
+      ].join("|");
+      if (!surfaceCache || surfaceCache.key !== surfaceKey) {
+        renderGpu(box, surfaceW, surfaceH, pixelRatio * scale);
+        surfaceCache?.image.close();
+        surfaceCache = {
+          key: surfaceKey,
+          image: glCanvas.transferToImageBitmap(),
+        };
+        redrew = true;
+      }
       ctx.drawImage(
-        glCanvas as unknown as CanvasImageSource,
+        surfaceCache.image,
         0,
         0,
         surfaceW,
@@ -661,13 +699,64 @@ function render(req: RenderRequest): void {
         height,
       );
     }
-    drawOverlay(ctx, box, width, height, resolution, pixelRatio, zoom);
+    const overlayKey = [
+      fieldVersion,
+      samplesVersion,
+      box.join(","),
+      width,
+      height,
+      resolution,
+      pixelRatio,
+      zoom,
+      settings?.vectorContours,
+      settings?.contourIntervalMetres,
+      settings?.minorContourMetres,
+      settings?.contourWidthPx,
+      settings?.minorContourWidthPx,
+      settings?.majorContourColor,
+      settings?.minorContourColor,
+      settings?.safetyDepthMetres,
+      settings?.cellPx,
+      settings?.mergeTolerance,
+      settings?.maxDepthMetres,
+      settings?.shadeLimitMetres,
+    ].join("|");
+    if (!overlayCache || overlayCache.key !== overlayKey) {
+      if (
+        !overlayCanvas ||
+        !overlayCtx ||
+        overlayCanvas.width !== width ||
+        overlayCanvas.height !== height
+      ) {
+        overlayCanvas = new OffscreenCanvas(width, height);
+        overlayCtx = overlayCanvas.getContext("2d");
+      }
+      if (overlayCtx) {
+        overlayCtx.clearRect(0, 0, width, height);
+        drawOverlay(
+          overlayCtx,
+          box,
+          width,
+          height,
+          resolution,
+          pixelRatio,
+          zoom,
+        );
+        overlayCache?.image.close();
+        overlayCache = {
+          key: overlayKey,
+          image: overlayCanvas.transferToImageBitmap(),
+        };
+        redrew = true;
+      }
+    }
+    if (overlayCache) ctx.drawImage(overlayCache.image, 0, 0);
     const image = out.transferToImageBitmap();
     const frameMs = performance.now() - started;
     // Auto: smooth the cost and adjust only every few frames, with hysteresis,
     // so the surface settles instead of hunting under the user. `drawImage`
     // syncs the GL pass, so the window covers the real per-frame work.
-    if ((settings?.quality ?? "auto") === "auto") {
+    if (redrew && (settings?.quality ?? "auto") === "auto") {
       frameAvgMs =
         frameAvgMs === 0 ? frameMs : frameAvgMs * 0.8 + frameMs * 0.2;
       if (++framesSinceAdjust >= AUTO_ADJUST_EVERY) {
