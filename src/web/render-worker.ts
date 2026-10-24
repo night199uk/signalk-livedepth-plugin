@@ -510,13 +510,15 @@ function drawOverlay(
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
 
-  // A filled disc at `p`; shoals draw the minimum dot, clusters draw their
-  // full spatial radius (`radiusMetres`) so a run of similar soundings reads as
-  // a circle rather than a speck.
-  const minDotPx = Math.max(1.5, settings!.cellPx * 0.12) * ratio;
-  const disc = (p: [number, number], depth: number, radiusPx = 0) => {
+  const dot = (p: [number, number], depth: number) => {
     ctx.beginPath();
-    ctx.arc(p[0], p[1], Math.max(minDotPx, radiusPx), 0, Math.PI * 2);
+    ctx.arc(
+      p[0],
+      p[1],
+      Math.max(1.5, settings!.cellPx * 0.12) * ratio,
+      0,
+      Math.PI * 2,
+    );
     ctx.fillStyle = depthCss(depth, settings!.shadeLimitMetres, 0.95);
     ctx.fill();
   };
@@ -542,7 +544,7 @@ function drawOverlay(
       value: selectShoals(samples, settings.safetyDepthMetres),
     };
   }
-  shoalCache.value.forEach((s) => disc(toPixel(s.lon, s.lat), s.depth));
+  shoalCache.value.forEach((s) => dot(toPixel(s.lon, s.lat), s.depth));
 
   const cellSize = Math.max(1, settings.cellPx * resolution);
   const clusterKey = `${samplesVersion}:${cellSize}:${settings.mergeTolerance}:${settings.maxDepthMetres}`;
@@ -561,13 +563,14 @@ function drawOverlay(
   for (const c of clusters) {
     const p = toPixel(c.lon, c.lat);
     const radiusPx = (c.radiusMetres / resolution) * ratio;
-    disc(p, c.depth, radiusPx);
     if (radiusPx >= LABEL_MIN_RADIUS_PX) {
       const fontCss = Math.max(
         LABEL_FONT_MIN,
         Math.min(LABEL_FONT_MAX, (zoom - 8) * 1.5 + LABEL_FONT_MIN),
       );
       label(formatDepth(c.depth), p, fontCss);
+    } else {
+      dot(p, c.depth);
     }
   }
 

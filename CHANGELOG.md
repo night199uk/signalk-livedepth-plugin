@@ -4,6 +4,14 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.10] - 2026-10-24
+
+### Changed
+
+- **Sounding markers**: a cluster's small dot is drawn only when its depth
+  label is not, so labelled clusters show just the text. Reverted the 0.3.9
+  full-radius circle.
+
 ## [0.3.9] - 2026-10-24
 
 ### Changed

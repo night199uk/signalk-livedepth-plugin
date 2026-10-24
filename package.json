@@ -1,6 +1,6 @@
 {
   "name": "signalk-livedepth-plugin",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "Build and visualise a depth map from your own soundings, live on the chart as your vessel moves.",
   "keywords": [
     "signalk-node-server-plugin",
