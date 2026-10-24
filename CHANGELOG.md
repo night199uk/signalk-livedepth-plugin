@@ -4,13 +4,12 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.7] - 2026-10-24
+## [0.3.8] - 2026-10-24
 
-### Fixed
+### Changed
 
-- **Sounding dots** stay visible past the shade limit. They reused the surface
-  palette, which is white at/beyond the limit, so deep soundings (e.g. 11-13 m
-  with a 10 m limit) drew as near-invisible white dots.
+- Reverted the 0.3.7 sounding-dot tint: the centre marker uses the depth
+  palette again (so it is white, not blue, in deep water).
 
 ## [0.3.6] - 2026-10-24
 
