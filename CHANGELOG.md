@@ -4,6 +4,22 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2026-10-24
+
+### Changed
+
+- **Depth shading** now uses the Navionics SonarChart water palette: azure in
+  shallow water, fading through pale blues to white at the shade limit.
+- **Vector contours** are split into major (index) and minor lines, with
+  configurable intervals, widths and colours.
+- **Graphics Settings** group in the panel; isobath intervals sit with the depth
+  settings.
+
+### Fixed
+
+- The render worker URL carries the package version, so a browser no longer
+  keeps running a previous build after an update.
+
 ## [0.3.5] - 2026-10-23
 
 ### Added
