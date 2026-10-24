@@ -140,19 +140,6 @@ export function depthCss(depth: number, shadeLimit: number, alpha = 1): string {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-/** Fraction of the ramp a sounding dot may reach. The shading ramp is white at
- * the shade limit, so a dot for a deeper sounding would disappear against a
- * pale chart; stop at the last clearly tinted (pale blue) stop instead. */
-const DOT_MAX_T = 0.75;
-
-/** {@link depthColor} for a sounding dot, capped so deep soundings stay visible. */
-export function dotCss(depth: number, shadeLimit: number, alpha = 1): string {
-  const limit = shadeLimit > 0 ? shadeLimit : DEFAULT_SHADE_LIMIT_M;
-  const fraction = Math.min(DOT_MAX_T, Math.max(0, depth / limit));
-  const [r, g, b] = shadeColor(fraction);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
 /** Aggregate samples into a Web Mercator grid, keeping the SHALLOWEST depth in
  * each cell. `maxDepthMetres` drops samples deeper than the display range
  * (they can never form a cell's minimum anyway); a sample that idles in the
