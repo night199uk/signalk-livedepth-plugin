@@ -102,8 +102,8 @@ const FIELDS: Field[] = [
   },
   {
     key: "contourWidthPx",
-    label: "Contour width",
-    hint: "Vector isobar line width.",
+    label: "Vector contour width",
+    hint: "Width of the vector isobar lines.",
     suffix: "px",
   },
 ];
@@ -118,7 +118,7 @@ interface Toggle {
 const TOGGLES: Toggle[] = [
   {
     key: "fullResolution",
-    label: "Full-resolution surface",
+    label: "Full surface resolution",
     hint: "Draw the shaded surface at the display's full size instead of the quality scale (like crowd-depth).",
   },
   {
@@ -132,6 +132,29 @@ const TOGGLES: Toggle[] = [
     hint: "Antialias the WebGL surface edges; applied on the next frame.",
   },
 ];
+
+/** One control in the Graphics Settings group, in display order. */
+type GraphicsItem =
+  | { kind: "quality" }
+  | { kind: "toggle"; key: keyof LiveDepthSettings }
+  | { kind: "field"; key: keyof LiveDepthSettings };
+
+/** The render controls, grouped at the bottom: quality, contours, full-res,
+ * MSAA and the depth-field resolution. */
+const GRAPHICS: GraphicsItem[] = [
+  { kind: "quality" },
+  { kind: "toggle", key: "vectorContours" },
+  { kind: "field", key: "contourWidthPx" },
+  { kind: "toggle", key: "fullResolution" },
+  { kind: "toggle", key: "msaa" },
+  { kind: "field", key: "fieldCells" },
+];
+
+const fieldByKey = new Map(FIELDS.map((field) => [field.key, field]));
+const toggleByKey = new Map(TOGGLES.map((toggle) => [toggle.key, toggle]));
+const graphicsFieldKeys = new Set(
+  GRAPHICS.flatMap((item) => (item.kind === "field" ? [item.key] : [])),
+);
 
 const unitSymbol = () => (depthUnit === "foot" ? "ft" : "m");
 const toDisplay = (metres: number) =>
@@ -300,6 +323,36 @@ function build(): void {
   source.appendChild(sourceHint);
   root.appendChild(source);
 
+  for (const field of FIELDS) {
+    if (!graphicsFieldKeys.has(field.key)) {
+      root.appendChild(numberField(field));
+    }
+  }
+
+  const graphicsHeading = document.createElement("h3");
+  graphicsHeading.textContent = "Graphics Settings";
+  root.appendChild(graphicsHeading);
+
+  for (const item of GRAPHICS) {
+    if (item.kind === "quality") {
+      root.appendChild(qualityField());
+    } else if (item.kind === "toggle") {
+      const toggle = toggleByKey.get(item.key);
+      if (toggle) {
+        root.appendChild(toggleField(toggle));
+      }
+    } else {
+      const field = fieldByKey.get(item.key);
+      if (field) {
+        root.appendChild(numberField(field));
+      }
+    }
+  }
+  syncHistoryDisabled();
+}
+
+/** The render-quality select, shared by the Graphics Settings group. */
+function qualityField(): HTMLElement {
   const quality = document.createElement("label");
   quality.className = "field";
   const qualityName = document.createElement("span");
@@ -329,16 +382,7 @@ function build(): void {
     "Scales the shaded depth surface only; soundings, circles and labels " +
     "always render at full resolution. Auto adapts to this GPU.";
   quality.appendChild(qualityHint);
-  root.appendChild(quality);
-
-  for (const toggle of TOGGLES) {
-    root.appendChild(toggleField(toggle));
-  }
-
-  for (const field of FIELDS) {
-    root.appendChild(numberField(field));
-  }
-  syncHistoryDisabled();
+  return quality;
 }
 
 async function save(): Promise<void> {
