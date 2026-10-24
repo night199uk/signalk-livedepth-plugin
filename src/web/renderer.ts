@@ -50,9 +50,12 @@ const LIVE_FLUSH_MS = 300;
 const DEFAULT_DEPTH_PATH = "environment.depth.belowTransducer";
 
 const client = await connectExtension();
-const worker = new Worker(new URL("./render-worker.js", import.meta.url), {
-  type: "module",
-});
+// Version the worker URL so a plugin update (a new deploy) is never served
+// from the browser's cache of the previous worker.
+const worker = new Worker(
+  new URL(`./render-worker.js?v=${__VERSION__}`, import.meta.url),
+  { type: "module" },
+);
 
 let settings: LiveDepthSettings = { ...DEFAULT_SETTINGS };
 let transducer: TransducerOffset | null = null;

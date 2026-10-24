@@ -7,13 +7,22 @@
 // separately by tsc.
 
 import { build } from "esbuild";
-import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const web = join(root, "src", "web");
 const pub = join(root, "public");
+const { version } = JSON.parse(
+  readFileSync(join(root, "package.json"), "utf8"),
+);
 
 rmSync(pub, { recursive: true, force: true });
 mkdirSync(join(pub, "js"), { recursive: true });
@@ -32,6 +41,7 @@ await build({
   sourcemap: true,
   target: ["es2022"],
   logLevel: "info",
+  define: { __VERSION__: JSON.stringify(version) },
 });
 
 cpSync(join(web, "styles.css"), join(pub, "styles.css"));
