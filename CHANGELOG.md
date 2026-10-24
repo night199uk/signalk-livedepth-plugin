@@ -4,6 +4,14 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.9] - 2026-10-24
+
+### Changed
+
+- **Sounding clusters** are drawn as a filled circle sized to their spatial
+  extent (`radiusMetres`) instead of a fixed centre dot, so a run of similar
+  soundings reads as a full circle. Individual shoals keep the small dot.
+
 ## [0.3.8] - 2026-10-24
 
 ### Changed
