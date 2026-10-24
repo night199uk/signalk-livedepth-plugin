@@ -91,15 +91,16 @@ export function latOf(y: number): number {
   return (2 * Math.atan(Math.exp(y / EARTH_RADIUS)) - Math.PI / 2) / RAD;
 }
 
-/** Depth tint, Navionics-like: a saturated azure at the surface, fading
- * through pale blue to white at the shade limit. Stops are `[t, r, g, b]` with
- * `t` the fraction from the surface (0) to the shade limit (1). */
+/** Depth tint, after the Navionics SonarChart water palette: white at the
+ * surface, deepening through pale blues to a saturated azure at the shade
+ * limit. Stops are `[t, r, g, b]` with `t` the fraction from the surface (0)
+ * to the shade limit (1). */
 const SHADE_RAMP: ReadonlyArray<readonly [number, number, number, number]> = [
-  [0, 26, 132, 216],
-  [0.3, 96, 178, 232],
-  [0.55, 156, 209, 240],
-  [0.78, 205, 232, 248],
-  [1, 255, 255, 255],
+  [0, 248, 248, 248],
+  [0.25, 183, 223, 248],
+  [0.5, 167, 223, 248],
+  [0.75, 143, 215, 248],
+  [1, 37, 175, 248],
 ];
 
 /** Isobaths drawn between the surface and the shade limit. */
@@ -124,7 +125,8 @@ export function shadeColor(t: number): [number, number, number] {
   return [lerp(lo[1], hi[1]), lerp(lo[2], hi[2]), lerp(lo[3], hi[3])];
 }
 
-/** RGB for a depth: azure at the surface, white at `shadeLimit` and beyond. */
+/** RGB for a depth: white at the surface, deep azure at `shadeLimit` and
+ * beyond. */
 export function depthColor(
   depth: number,
   shadeLimit: number,

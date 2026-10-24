@@ -25,26 +25,26 @@ const sample = (lon: number, lat: number, depth: number): DepthSample => ({
 });
 
 describe("live-depth shade palette", () => {
-  it("runs from a saturated azure (surface) to white (shade limit)", () => {
-    expect(shadeColor(0)).toEqual([26, 132, 216]);
-    expect(shadeColor(1)).toEqual([255, 255, 255]);
+  it("runs from white (surface) to azure (shade limit)", () => {
+    expect(shadeColor(0)).toEqual([248, 248, 248]);
+    expect(shadeColor(1)).toEqual([37, 175, 248]);
   });
 
-  it("lightens as the depth approaches the shade limit", () => {
-    expect(shadeColor(0)[2]).toBeLessThan(shadeColor(0.5)[2]);
-    expect(shadeColor(0.5)[2]).toBeLessThan(shadeColor(1)[2]);
+  it("deepens as the depth approaches the shade limit", () => {
+    expect(shadeColor(0)[0]).toBeGreaterThan(shadeColor(0.5)[0]);
+    expect(shadeColor(0.5)[0]).toBeGreaterThan(shadeColor(1)[0]);
   });
 
   it("maps a depth to a colour relative to the shade limit", () => {
     expect(depthColor(0, 10)).toEqual(shadeColor(0));
     expect(depthColor(5, 10)).toEqual(shadeColor(0.5));
-    // at and beyond the limit the colour is white
-    expect(depthColor(10, 10)).toEqual([255, 255, 255]);
-    expect(depthColor(50, 10)).toEqual([255, 255, 255]);
+    // at and beyond the limit the colour is the deepest azure
+    expect(depthColor(10, 10)).toEqual([37, 175, 248]);
+    expect(depthColor(50, 10)).toEqual([37, 175, 248]);
   });
 
   it("renders a CSS colour with the requested alpha", () => {
-    expect(depthCss(0, 10, 0.5)).toBe("rgba(26,132,216,0.5)");
+    expect(depthCss(0, 10, 0.5)).toBe("rgba(248,248,248,0.5)");
   });
 });
 
