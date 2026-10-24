@@ -13,28 +13,59 @@ const field = (depth: number[]): DepthField => ({
 describe("extractContours", () => {
   it("emits a segment where the depth crosses a level", () => {
     // d00=0 d10=10 / d01=0 d11=10 -> a vertical crossing at x = 0.5
-    const segs = extractContours(field([0, 10, 0, 10]), 5, 5);
-    expect(segs).toHaveLength(1);
-    const [x0, y0, x1, y1] = segs[0];
+    const { major, minor } = extractContours(field([0, 10, 0, 10]), 5, 5, 5);
+    expect(minor).toHaveLength(0);
+    expect(major).toHaveLength(1);
+    const [x0, y0, x1, y1] = major[0];
     expect(x0).toBeCloseTo(0.5);
     expect(x1).toBeCloseTo(0.5);
     expect(Math.abs(y1 - y0)).toBeCloseTo(1);
   });
 
+  it("splits levels into major (index) and minor contours", () => {
+    // 0..7 crosses minors 1,2,3,4,6 and the major at 5
+    const { major, minor } = extractContours(field([0, 7, 0, 7]), 1, 5, 10);
+    expect(major).toHaveLength(1);
+    expect(minor).toHaveLength(5);
+  });
+
   it("emits nothing when no level falls strictly inside the cell", () => {
-    expect(extractContours(field([1, 2, 1, 2]), 1, 10)).toHaveLength(0);
+    const { major, minor } = extractContours(field([1, 2, 1, 2]), 1, 10, 10);
+    expect(major).toHaveLength(0);
+    expect(minor).toHaveLength(0);
   });
 
   it("stops at an uncovered cell", () => {
-    expect(extractContours(field([0, 10, NaN, 10]), 1, 10)).toHaveLength(0);
-  });
-
-  it("tracks every level a cell straddles", () => {
-    // 0..4 crosses levels 1, 2 and 3
-    expect(extractContours(field([0, 4, 0, 4]), 1, 10)).toHaveLength(3);
+    const { major, minor } = extractContours(
+      field([0, 10, NaN, 10]),
+      1,
+      10,
+      10,
+    );
+    expect(major).toHaveLength(0);
+    expect(minor).toHaveLength(0);
   });
 
   it("honours the maximum level", () => {
-    expect(extractContours(field([20, 30, 20, 30]), 1, 10)).toHaveLength(0);
+    const { major, minor } = extractContours(
+      field([20, 30, 20, 30]),
+      1,
+      10,
+      10,
+    );
+    expect(major).toHaveLength(0);
+    expect(minor).toHaveLength(0);
+  });
+
+  it("treats a level on both grids as major", () => {
+    // 1 ft minor, 5 ft major, in metres: 1.524 m is on both grids
+    const { major, minor } = extractContours(
+      field([0, 1.524, 0, 1.524]),
+      0.3048,
+      1.524,
+      10,
+    );
+    expect(major).toHaveLength(1);
+    expect(minor).toHaveLength(4);
   });
 });

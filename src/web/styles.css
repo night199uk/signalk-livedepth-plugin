@@ -113,6 +113,15 @@ input[type="checkbox"] {
   accent-color: var(--accent);
 }
 
+input[type="color"] {
+  width: 44px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
 .status {
   color: var(--muted);
 }

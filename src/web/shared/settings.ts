@@ -27,16 +27,24 @@ export interface LiveDepthSettings {
   /** Cap on either depth-field dimension. Higher resolves finer contours at the
    * cost of memory and build time. */
   fieldCells: number;
-  /** Vector isobar line width, in screen pixels. */
+  /** Major (index) vector isobar line width, in screen pixels. */
   contourWidthPx: number;
+  /** Minor vector isobar line width, in screen pixels. */
+  minorContourWidthPx: number;
+  /** Major (index) isobar colour (CSS). */
+  majorContourColor: string;
+  /** Minor isobar colour (CSS). */
+  minorContourColor: string;
   /** History look-back window, in hours. */
   historyWindowHours: number;
   /** History sample interval, in seconds. */
   historyResolutionS: number;
   /** Depth (metres) the shading runs to; deeper is left to the chart. */
   shadeLimitMetres: number;
-  /** Depth (metres) between isobaths. */
+  /** Depth (metres) between major isobaths (the index contours). */
   contourIntervalMetres: number;
+  /** Depth (metres) between minor isobaths. */
+  minorContourMetres: number;
   /** Radius (metres) over which a sounding fills water with no samples of its
    * own, so a single pass paints a readable swath instead of a hairline track.
    * Measured cells keep their own depth; the fill fades linearly to nothing at
@@ -62,10 +70,14 @@ export const DEFAULT_SETTINGS: LiveDepthSettings = {
   msaa: true,
   fieldCells: 2048,
   contourWidthPx: 1,
+  minorContourWidthPx: 0.75,
+  majorContourColor: "#000000",
+  minorContourColor: "#9aa4a8",
   historyWindowHours: 1,
   historyResolutionS: 0.1,
   shadeLimitMetres: 10,
-  contourIntervalMetres: 1,
+  contourIntervalMetres: 1.524,
+  minorContourMetres: 0.3048,
   fillMetres: 6,
   cellPx: 24,
   mergeTolerance: 0.15,
@@ -95,11 +107,13 @@ export const SETTINGS_BOUNDS: Partial<
   historyWindowHours: { min: 0.1, max: 168, step: 0.1 },
   historyResolutionS: { min: 0.01, max: 60, step: 0.01 },
   shadeLimitMetres: { min: 1, max: 200, step: 1 },
-  contourIntervalMetres: { min: 0.5, max: 50, step: 0.5 },
+  contourIntervalMetres: { min: 0.3048, max: 50, step: 0.3048 },
+  minorContourMetres: { min: 0.3048, max: 50, step: 0.3048 },
   fillMetres: { min: 0, max: 20, step: 1 },
   cellPx: { min: 4, max: 128, step: 1 },
   fieldCells: { min: 256, max: 4096, step: 256 },
   contourWidthPx: { min: 0.5, max: 6, step: 0.5 },
+  minorContourWidthPx: { min: 0.5, max: 6, step: 0.25 },
   mergeTolerance: { min: 0, max: 1, step: 0.01 },
   maxDepthMetres: { min: 1, max: 500, step: 1 },
   safetyDepthMetres: { min: 0, max: 50, step: 0.5 },

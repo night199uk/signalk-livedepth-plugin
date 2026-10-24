@@ -22,7 +22,11 @@ import {
   type DepthFieldBuilder,
 } from "./shared/bathymetry.js";
 import { DEPTH_FRAG_SRC, DEPTH_VERT_SRC } from "./shared/shaders.js";
-import { extractContours, type ContourSegment } from "./shared/contours.js";
+import {
+  extractContours,
+  type ContourSegment,
+  type ContourSet,
+} from "./shared/contours.js";
 import {
   DEFAULT_COVERAGE_MIN_M,
   medianConsecutiveGap,
@@ -85,8 +89,8 @@ let samplesVersion = 0;
  * instead of re-aggregating every sample. */
 let shoalCache: { key: string; value: DepthSample[] } | null = null;
 let clusterCache: { key: string; value: DepthCluster[] } | null = null;
-/** Vector contour segments for the current field, in world metres. */
-let contours: ContourSegment[] = [];
+/** Vector contours for the current field, in world metres. */
+let contours: ContourSet = { major: [], minor: [] };
 /** The MSAA setting the live GL context was created with. */
 let gpuMsaa = true;
 
@@ -360,10 +364,11 @@ function rebuildField(): void {
   contours = settings.vectorContours
     ? extractContours(
         next.field,
+        Math.max(0.01, settings.minorContourMetres),
         Math.max(0.01, settings.contourIntervalMetres),
         Math.max(0, settings.maxDepthMetres),
       )
-    : [];
+    : { major: [], minor: [] };
 }
 
 /** Fold new own-vessel soundings in, refreshing only the cells they reach. */
@@ -444,7 +449,9 @@ function drawContours(
 ): void {
   if (!settings?.vectorContours) return;
   const f = builder?.field;
-  if (!f || contours.length === 0) return;
+  if (!f || (contours.major.length === 0 && contours.minor.length === 0)) {
+    return;
+  }
   const boxW = box[2] - box[0];
   const boxH = box[3] - box[1];
   if (!(boxW > 0) || !(boxH > 0)) return;
@@ -455,16 +462,30 @@ function drawContours(
     WORLD_WIDTH;
   const px = (x: number) => ((x + shift - box[0]) / boxW) * canvasW;
   const py = (y: number) => ((box[3] - y) / boxH) * canvasH;
-  ctx.beginPath();
-  for (const [x0, y0, x1, y1] of contours) {
-    ctx.moveTo(px(x0), py(y0));
-    ctx.lineTo(px(x1), py(y1));
-  }
-  ctx.lineWidth = Math.max(1, (settings.contourWidthPx ?? 1.5) * ratio);
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
-  ctx.stroke();
+  const stroke = (
+    segments: ContourSegment[],
+    color: string,
+    widthPx: number,
+  ) => {
+    if (segments.length === 0) return;
+    ctx.beginPath();
+    for (const [x0, y0, x1, y1] of segments) {
+      ctx.moveTo(px(x0), py(y0));
+      ctx.lineTo(px(x1), py(y1));
+    }
+    ctx.lineWidth = Math.max(0.5, widthPx * ratio);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = color;
+    ctx.stroke();
+  };
+  // Minor first, so the darker index contours sit on top.
+  stroke(
+    contours.minor,
+    settings.minorContourColor,
+    settings.minorContourWidthPx,
+  );
+  stroke(contours.major, settings.majorContourColor, settings.contourWidthPx);
 }
 
 function drawOverlay(

@@ -8,6 +8,9 @@
  *
  * Each cell emits only the contour levels it actually straddles, so the cost
  * scales with the number of crossings rather than cells × levels.
+ *
+ * Levels are walked at the finer of the two intervals; a level that also lands
+ * on the major grid is returned as a major (index) contour, the rest as minor.
  */
 
 import type { DepthField } from "./bathymetry.js";
@@ -15,21 +18,39 @@ import type { DepthField } from "./bathymetry.js";
 /** One contour segment in world metres: `[x0, y0, x1, y1]`. */
 export type ContourSegment = [number, number, number, number];
 
-/** Marching-squares contours of `field` at every multiple of `step` metres up
- * to `maxLevel` (inclusive). */
+/** Major (index) and minor contours of a field. */
+export interface ContourSet {
+  major: ContourSegment[];
+  minor: ContourSegment[];
+}
+
+/** Whether `level` is a whole multiple of `step` (within float tolerance). */
+function onGrid(level: number, step: number): boolean {
+  const n = level / step;
+  return Math.abs(n - Math.round(n)) < 1e-6;
+}
+
+/** Marching-squares contours of `field`: every multiple of `minorStep` is a
+ * minor contour, every multiple of `majorStep` a major one, up to `maxLevel`
+ * (inclusive). A level on both grids is major. */
 export function extractContours(
   field: DepthField,
-  step: number,
+  minorStep: number,
+  majorStep: number,
   maxLevel: number,
-): ContourSegment[] {
+): ContourSet {
   const { width, height, depth, extent } = field;
-  if (width < 2 || height < 2 || !(step > 0)) return [];
+  const result: ContourSet = { major: [], minor: [] };
+  const minor = minorStep > 0 ? minorStep : 1;
+  const major = majorStep > 0 ? majorStep : minor;
+  if (width < 2 || height < 2) return result;
   const cell = (extent[2] - extent[0]) / width;
   const at = (gx: number, gy: number) => depth[gy * width + gx];
   // Corner offsets around a cell, in order (0,0) (1,0) (1,1) (0,1).
   const ox = [0, 1, 1, 0];
   const oy = [0, 0, 1, 1];
-  const segments: ContourSegment[] = [];
+  // Walk at the finer interval so both grids are covered.
+  const step = Math.min(minor, major);
 
   for (let gy = 0; gy < height - 1; gy++) {
     for (let gx = 0; gx < width - 1; gx++) {
@@ -54,6 +75,7 @@ export function extractContours(
       const first = Math.floor(lo / step) * step + step;
       for (let level = first; level < hi && level <= maxLevel; level += step) {
         if (level <= lo) continue;
+        const out = onGrid(level, major) ? result.major : result.minor;
         // Edge i runs corner i -> i+1 (0:(0-1) 1:(1-2) 2:(2-3) 3:(3-0)).
         const cross: Array<[number, number] | null> = [null, null, null, null];
         const crossed: number[] = [];
@@ -71,20 +93,20 @@ export function extractContours(
         }
         if (crossed.length === 2) {
           const [a, b] = crossed;
-          segments.push([...cross[a]!, ...cross[b]!]);
+          out.push([...cross[a]!, ...cross[b]!]);
         } else if (crossed.length === 4) {
           // Ambiguous saddle: split by the cell-centre average.
           const centre = (d[0] + d[1] + d[2] + d[3]) / 4;
           if (centre >= level) {
-            segments.push([...cross[0]!, ...cross[1]!]);
-            segments.push([...cross[2]!, ...cross[3]!]);
+            out.push([...cross[0]!, ...cross[1]!]);
+            out.push([...cross[2]!, ...cross[3]!]);
           } else {
-            segments.push([...cross[0]!, ...cross[3]!]);
-            segments.push([...cross[1]!, ...cross[2]!]);
+            out.push([...cross[0]!, ...cross[3]!]);
+            out.push([...cross[1]!, ...cross[2]!]);
           }
         }
       }
     }
   }
-  return segments;
+  return result;
 }

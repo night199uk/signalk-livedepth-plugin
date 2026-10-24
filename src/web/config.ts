@@ -62,8 +62,14 @@ const FIELDS: Field[] = [
   },
   {
     key: "contourIntervalMetres",
-    label: "Isobath interval",
-    hint: "Depth between isobaths.",
+    label: "Major isobath interval",
+    hint: "Depth between index isobaths; every multiple of this is a major contour.",
+    depth: true,
+  },
+  {
+    key: "minorContourMetres",
+    label: "Minor isobath interval",
+    hint: "Depth between the minor isobaths.",
     depth: true,
   },
   {
@@ -102,8 +108,14 @@ const FIELDS: Field[] = [
   },
   {
     key: "contourWidthPx",
-    label: "Vector contour width",
-    hint: "Width of the vector isobar lines.",
+    label: "Major contour width",
+    hint: "Major (index) isobar line width.",
+    suffix: "px",
+  },
+  {
+    key: "minorContourWidthPx",
+    label: "Minor contour width",
+    hint: "Minor isobar line width.",
     suffix: "px",
   },
 ];
@@ -133,18 +145,44 @@ const TOGGLES: Toggle[] = [
   },
 ];
 
+interface ColorField {
+  key: keyof LiveDepthSettings;
+  label: string;
+  hint: string;
+}
+
+/** String-valued colour settings, rendered as colour pickers. */
+const COLOR_FIELDS: ColorField[] = [
+  {
+    key: "majorContourColor",
+    label: "Major contour colour",
+    hint: "Colour of the index (major) isobars.",
+  },
+  {
+    key: "minorContourColor",
+    label: "Minor contour colour",
+    hint: "Colour of the minor isobars.",
+  },
+];
+
 /** One control in the Graphics Settings group, in display order. */
 type GraphicsItem =
   | { kind: "quality" }
   | { kind: "toggle"; key: keyof LiveDepthSettings }
-  | { kind: "field"; key: keyof LiveDepthSettings };
+  | { kind: "field"; key: keyof LiveDepthSettings }
+  | { kind: "color"; key: keyof LiveDepthSettings };
 
 /** The render controls, grouped at the bottom: quality, contours, full-res,
  * MSAA and the depth-field resolution. */
 const GRAPHICS: GraphicsItem[] = [
   { kind: "quality" },
   { kind: "toggle", key: "vectorContours" },
+  { kind: "field", key: "contourIntervalMetres" },
+  { kind: "field", key: "minorContourMetres" },
   { kind: "field", key: "contourWidthPx" },
+  { kind: "field", key: "minorContourWidthPx" },
+  { kind: "color", key: "majorContourColor" },
+  { kind: "color", key: "minorContourColor" },
   { kind: "toggle", key: "fullResolution" },
   { kind: "toggle", key: "msaa" },
   { kind: "field", key: "fieldCells" },
@@ -152,6 +190,7 @@ const GRAPHICS: GraphicsItem[] = [
 
 const fieldByKey = new Map(FIELDS.map((field) => [field.key, field]));
 const toggleByKey = new Map(TOGGLES.map((toggle) => [toggle.key, toggle]));
+const colorByKey = new Map(COLOR_FIELDS.map((field) => [field.key, field]));
 const graphicsFieldKeys = new Set(
   GRAPHICS.flatMap((item) => (item.kind === "field" ? [item.key] : [])),
 );
@@ -341,6 +380,11 @@ function build(): void {
       if (toggle) {
         root.appendChild(toggleField(toggle));
       }
+    } else if (item.kind === "color") {
+      const color = colorByKey.get(item.key);
+      if (color) {
+        root.appendChild(colorField(color));
+      }
     } else {
       const field = fieldByKey.get(item.key);
       if (field) {
@@ -349,6 +393,27 @@ function build(): void {
     }
   }
   syncHistoryDisabled();
+}
+
+function colorField(field: ColorField): HTMLElement {
+  const wrap = document.createElement("label");
+  wrap.className = "field row";
+  const name = document.createElement("span");
+  name.className = "name";
+  name.textContent = field.label;
+  const input = document.createElement("input");
+  input.type = "color";
+  input.value = settings[field.key] as string;
+  input.addEventListener("input", () => {
+    (settings[field.key] as unknown as string) = input.value;
+    void save();
+  });
+  wrap.append(name, input);
+  const hint = document.createElement("span");
+  hint.className = "hint";
+  hint.textContent = field.hint;
+  wrap.appendChild(hint);
+  return wrap;
 }
 
 /** The render-quality select, shared by the Graphics Settings group. */
