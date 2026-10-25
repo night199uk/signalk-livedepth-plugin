@@ -1,0 +1,56 @@
+name: Release
+
+# On a version tag, publish the package and create the GitHub Release whose
+# notes the Signal K App Store's Changelog tab reads. The notes are GitHub's
+# auto-generated list of merged PRs since the previous tag; `.github/release.yml`
+# groups them by label.
+#
+# Tag `vX.Y.Z` publishes to npm's `latest`; `vX.Y.Z-beta.N` (or alpha / rc)
+# marks a pre-release and publishes to the matching npm dist-tag.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Work out the npm dist-tag
+        id: dist
+        run: |
+          if [[ "$GITHUB_REF_NAME" =~ -(alpha|beta|rc) ]]; then
+            echo "tag=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: ${{ steps.dist.outputs.prerelease }}
+
+      - name: npm publish
+        run: npm publish --provenance --access public --tag "${{ steps.dist.outputs.tag }}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
