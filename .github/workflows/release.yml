@@ -7,6 +7,10 @@ name: Release
 #
 # Tag `vX.Y.Z` publishes to npm's `latest`; `vX.Y.Z-beta.N` (or alpha / rc)
 # marks a pre-release and publishes to the matching npm dist-tag.
+#
+# Publishing uses npm Trusted Publishing (OIDC), so there is no NPM_TOKEN
+# secret. The npmjs trusted publisher for the package must name this repository
+# and the workflow file `release.yml` (and its environment, if one is set).
 
 on:
   push:
@@ -25,9 +29,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Trusted Publishing needs npm >= 11.5.1; Node 24 ships npm 11.
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
 
@@ -50,7 +55,8 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ steps.dist.outputs.prerelease }}
 
+      # No token: with `id-token: write` above, npm exchanges the Actions OIDC
+      # token for publish rights against the trusted publisher configured on
+      # npmjs for this repository and workflow file.
       - name: npm publish
         run: npm publish --provenance --access public --tag "${{ steps.dist.outputs.tag }}"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
