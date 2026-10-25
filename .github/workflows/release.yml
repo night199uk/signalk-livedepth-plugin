@@ -30,13 +30,11 @@ jobs:
           fetch-depth: 0
 
       # Trusted Publishing needs npm >= 11.5.1; Node 24 ships npm 11.
-      # No `registry-url`: setup-node would write an _authToken line to .npmrc,
-      # and a token there takes precedence over the OIDC identity (npm then
-      # rejects the publish).
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
+          registry-url: https://registry.npmjs.org
 
       - run: npm ci --no-audit --no-fund
 
