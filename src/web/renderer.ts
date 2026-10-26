@@ -38,6 +38,42 @@ const BATHY_BASE = `${ASSET_BASE}/bathymetry`;
 
 /** Settle time before a moved view or a changed window is fetched. */
 const DEBOUNCE_MS = 400;
+/** Each side of the tile fetch box is this much wider than the view, so a pan
+ * or a follow step inside the padding reuses the fetched tiles and the built
+ * depth field instead of re-fetching and rebuilding. 0.25 = 1.5x the view. */
+const TILE_PAD = 0.25;
+const MAX_LAT = 85;
+
+/** The padded tile box that produced the current base samples. */
+let fetchedBounds: [number, number, number, number] | null = null;
+
+/** `bounds` with `pad` of its width and height added on each side. */
+function padBounds(
+  bounds: readonly number[],
+  pad: number,
+): [number, number, number, number] {
+  const [west, south, east, north] = bounds;
+  const dx = (east - west) * pad;
+  const dy = (north - south) * pad;
+  return [
+    west - dx,
+    Math.max(-MAX_LAT, south - dy),
+    east + dx,
+    Math.min(MAX_LAT, north + dy),
+  ];
+}
+
+function boundsContain(
+  outer: readonly number[],
+  inner: readonly number[],
+): boolean {
+  return (
+    inner[0] >= outer[0] &&
+    inner[1] >= outer[1] &&
+    inner[2] <= outer[2] &&
+    inner[3] <= outer[3]
+  );
+}
 /** How often the history source is refreshed while the layer is visible. */
 const POLL_MS = 15000;
 /** Most tile fetches a single view may need before the layer draws nothing. */
@@ -184,14 +220,19 @@ async function fetchHistory(): Promise<void> {
 }
 
 async function fetchTiles(req: RenderRequest): Promise<void> {
+  // Still inside the tiles (and field) already fetched: nothing to do.
+  if (fetchedBounds && boundsContain(fetchedBounds, req.bounds)) {
+    return;
+  }
+  const fetchBounds = padBounds(req.bounds, TILE_PAD);
   const cellMetres = Math.max(req.resolution, 0.01);
   let zoom = zoomForCellSize(cellMetres, MIN_ZOOM, BASE_ZOOM);
   while (zoom > MIN_ZOOM) {
-    const { xs, ys } = tileRangeForBbox(req.bounds, zoom);
+    const { xs, ys } = tileRangeForBbox(fetchBounds, zoom);
     if (xs.length * ys.length <= MAX_TILE_FETCHES) break;
     zoom--;
   }
-  const { xs, ys } = tileRangeForBbox(req.bounds, zoom);
+  const { xs, ys } = tileRangeForBbox(fetchBounds, zoom);
   const out: DepthSample[] = [];
   await Promise.all(
     xs.flatMap((x) =>
@@ -210,6 +251,7 @@ async function fetchTiles(req: RenderRequest): Promise<void> {
     ),
   );
   baseSamples = out;
+  fetchedBounds = fetchBounds;
   publishBase();
 }
 
@@ -400,6 +442,7 @@ await client.subscribe(["overlay.state"], (_name, payload) => {
   const state = payload as OverlayStateEvent;
   if (!state.visible || state.suspended) {
     worker.postMessage({ type: "release" });
+    fetchedBounds = null;
     stopLive();
   } else {
     startLive();

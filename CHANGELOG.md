@@ -4,6 +4,15 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.13] - 2026-10-26
+
+### Changed
+
+- **Following the vessel no longer rebuilds the depth grid on every step.** The
+  tiles are fetched for a box 1.5× the view, and while the view stays inside it
+  the fetched tiles and the built depth field are reused. The grid is only
+  rebuilt when the view leaves the padding (or new tile data arrives).
+
 ## [0.3.12] - 2026-10-26
 
 ### Changed
