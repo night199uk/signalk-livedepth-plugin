@@ -4,6 +4,17 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.12] - 2026-10-26
+
+### Changed
+
+- **Following the vessel no longer re-renders the depth surface every update.**
+  The surface is rendered for a view padded by 25% on each side, and a pan
+  inside that padding reuses it by blitting the covered sub-rectangle instead
+  of re-running the full-screen shader.
+- The frame canvas is reused between requests instead of allocating a fresh
+  full-window canvas (and clearing it) every frame.
+
 ## [0.3.11] - 2026-10-24
 
 ### Changed

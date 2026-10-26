@@ -77,7 +77,22 @@ let fieldVersion = 0;
  * affects them. Reusing them skips the per-pixel shader and the overlay's
  * canvas work on requests where nothing changed (the host asks for a frame
  * far more often than the field or the view changes). */
-let surfaceCache: { key: string; image: ImageBitmap } | null = null;
+let surfaceCache: {
+  key: string;
+  image: ImageBitmap;
+  box: [number, number, number, number];
+  width: number;
+  height: number;
+} | null = null;
+/** The output frame canvas, reused across requests (a fresh 2560×1267 canvas
+ * per frame is a ~13 MB allocation and a full clear every time). */
+let outCanvas: OffscreenCanvas | null = null;
+let outCtx: OffscreenCanvasRenderingContext2D | null = null;
+/** Each side of the surface is rendered this much wider than the view, so a
+ * following or panning map reuses the rendered surface instead of re-running
+ * the full-screen shader for every small move. 0.25 makes the bitmap 1.5× the
+ * view in each dimension. */
+const SURFACE_PAD = 0.25;
 let overlayCache: { key: string; image: ImageBitmap } | null = null;
 let overlayCanvas: OffscreenCanvas | null = null;
 let overlayCtx: OffscreenCanvasRenderingContext2D | null = null;
@@ -267,6 +282,8 @@ function releaseGpu(): void {
   glCanvas = null;
   surfaceCache?.image.close();
   surfaceCache = null;
+  outCanvas = null;
+  outCtx = null;
   overlayCache?.image.close();
   overlayCache = null;
   overlayCanvas = null;
@@ -658,8 +675,17 @@ function render(req: RenderRequest): void {
     const surfaceW = Math.max(1, Math.round(width * scale));
     const surfaceH = Math.max(1, Math.round(height * scale));
     const started = performance.now();
-    const out = new OffscreenCanvas(width, height);
-    const ctx = out.getContext("2d");
+    if (
+      !outCanvas ||
+      !outCtx ||
+      outCanvas.width !== width ||
+      outCanvas.height !== height
+    ) {
+      outCanvas = new OffscreenCanvas(width, height);
+      outCtx = outCanvas.getContext("2d");
+    }
+    const out = outCanvas;
+    const ctx = outCtx;
     if (!ctx) {
       post({ type: "error", message: "no 2D context" });
       return;
@@ -667,37 +693,55 @@ function render(req: RenderRequest): void {
     ctx.clearRect(0, 0, width, height);
     let redrew = false;
     if (builder && glCanvas) {
+      const padX = (box[2] - box[0]) * SURFACE_PAD;
+      const padY = (box[3] - box[1]) * SURFACE_PAD;
+      const padBox: [number, number, number, number] = [
+        box[0] - padX,
+        box[1] - padY,
+        box[2] + padX,
+        box[3] + padY,
+      ];
+      const padW = Math.max(1, Math.round(surfaceW * (1 + SURFACE_PAD * 2)));
+      const padH = Math.max(1, Math.round(surfaceH * (1 + SURFACE_PAD * 2)));
       const surfaceKey = [
         fieldVersion,
-        box.join(","),
-        surfaceW,
-        surfaceH,
+        padW,
+        padH,
         pixelRatio,
         settings?.shadeLimitMetres,
         settings?.contourIntervalMetres,
         settings?.vectorContours,
         settings?.msaa,
       ].join("|");
-      if (!surfaceCache || surfaceCache.key !== surfaceKey) {
-        renderGpu(box, surfaceW, surfaceH, pixelRatio * scale);
-        surfaceCache?.image.close();
+      const cached = surfaceCache;
+      const covers =
+        !!cached &&
+        cached.key === surfaceKey &&
+        box[0] >= cached.box[0] &&
+        box[1] >= cached.box[1] &&
+        box[2] <= cached.box[2] &&
+        box[3] <= cached.box[3];
+      if (!covers) {
+        renderGpu(padBox, padW, padH, pixelRatio * scale);
+        cached?.image.close();
         surfaceCache = {
           key: surfaceKey,
           image: glCanvas.transferToImageBitmap(),
+          box: padBox,
+          width: padW,
+          height: padH,
         };
         redrew = true;
       }
-      ctx.drawImage(
-        surfaceCache.image,
-        0,
-        0,
-        surfaceW,
-        surfaceH,
-        0,
-        0,
-        width,
-        height,
-      );
+      const cache = surfaceCache!;
+      // Blit the part of the padded surface the current view covers.
+      const cw = cache.box[2] - cache.box[0];
+      const ch = cache.box[3] - cache.box[1];
+      const sx = ((box[0] - cache.box[0]) / cw) * cache.width;
+      const sy = ((cache.box[3] - box[3]) / ch) * cache.height;
+      const sw = ((box[2] - box[0]) / cw) * cache.width;
+      const sh = ((box[3] - box[1]) / ch) * cache.height;
+      ctx.drawImage(cache.image, sx, sy, sw, sh, 0, 0, width, height);
     }
     const overlayKey = [
       fieldVersion,
