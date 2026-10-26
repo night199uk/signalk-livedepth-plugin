@@ -90,9 +90,9 @@ let outCanvas: OffscreenCanvas | null = null;
 let outCtx: OffscreenCanvasRenderingContext2D | null = null;
 /** Each side of the surface is rendered this much wider than the view, so a
  * following or panning map reuses the rendered surface instead of re-running
- * the full-screen shader for every small move. 0.25 makes the bitmap 1.5× the
- * view in each dimension. */
-const SURFACE_PAD = 0.25;
+ * the full-screen shader for every small move. 0.1 makes the bitmap 1.2× the
+ * view in each dimension, matching the host's OVERLAY_MARGIN. */
+const SURFACE_PAD = 0.1;
 let overlayCache: { key: string; image: ImageBitmap } | null = null;
 let overlayCanvas: OffscreenCanvas | null = null;
 let overlayCtx: OffscreenCanvasRenderingContext2D | null = null;

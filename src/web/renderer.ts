@@ -40,8 +40,8 @@ const BATHY_BASE = `${ASSET_BASE}/bathymetry`;
 const DEBOUNCE_MS = 400;
 /** Each side of the tile fetch box is this much wider than the view, so a pan
  * or a follow step inside the padding reuses the fetched tiles and the built
- * depth field instead of re-fetching and rebuilding. 0.25 = 1.5x the view. */
-const TILE_PAD = 0.25;
+ * depth field instead of re-fetching and rebuilding. 0.1 = 1.2x the view, matching the host's OVERLAY_MARGIN. */
+const TILE_PAD = 0.1;
 const MAX_LAT = 85;
 
 /** The padded tile box that produced the current base samples. */
