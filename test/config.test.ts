@@ -27,3 +27,20 @@ test("defaults are attached when the server has the values", () => {
   expect(s.properties.sounder.properties.y.default).toBe(3.2);
   expect(s.properties.sounder.properties.x.default).toBe(3.2);
 });
+
+test("the depth options include the custom tide-compensated paths", () => {
+  const s = schema(appReturning(undefined)) as unknown as {
+    properties: { path: { enum: string[]; enumNames: string[] } };
+  };
+  expect(s.properties.path.enum).toEqual([
+    "belowSurface",
+    "belowTransducer",
+    "belowKeel",
+    "belowSurfaceTideCompensated",
+    "belowSurfaceTideCompensatedLAT",
+    "belowSurfaceTideCompensatedMLLW",
+  ]);
+  expect(s.properties.path.enumNames).toHaveLength(
+    s.properties.path.enum.length,
+  );
+});
