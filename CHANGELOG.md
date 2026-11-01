@@ -4,6 +4,14 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.16] - 2026-11-01
+
+### Added
+
+- **Tide-compensated depth sources.** A tide-compensated rig that publishes
+  `environment.depth.belowSurfaceTideCompensated` (and the `LAT` and `MLLW`
+  variants) can now be chosen as the datum to record.
+
 ## [0.3.15] - 2026-11-01
 
 ### Fixed
