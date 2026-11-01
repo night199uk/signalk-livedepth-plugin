@@ -127,6 +127,9 @@ let perfFrameMs = 0;
 let framesSeen = 0;
 let framesSince = Date.now();
 let timer: ReturnType<typeof setTimeout> | undefined;
+/** True while the tab is hidden: no frames, no fetches, no timers. */
+let paused = false;
+let historyPoll: ReturnType<typeof setInterval> | undefined;
 
 // Own-vessel soundings buffered since the last flush, sent to the worker to be
 // folded into the field.
@@ -259,12 +262,13 @@ async function fetchTiles(req: RenderRequest): Promise<void> {
 }
 
 function schedule(): void {
+  if (paused) return;
   clearTimeout(timer);
   timer = setTimeout(() => void refresh(), DEBOUNCE_MS);
 }
 
 async function refresh(): Promise<void> {
-  if (!settings.enabled) return;
+  if (paused || !settings.enabled) return;
   if (settings.source === "history") {
     await fetchHistory();
   } else if (lastReq) {
@@ -336,6 +340,39 @@ function stopLive(): void {
   liveUnsub = undefined;
 }
 
+/** Stop all rendering work while the tab is hidden. A backgrounded tab is
+ * throttled but still wakes for our timers and can still be asked to render;
+ * parking everything keeps a hidden Freeboard close to idle and avoids drawing
+ * into a WebGL context the browser may evict. */
+function pauseRenderer(): void {
+  if (paused) return;
+  paused = true;
+  clearTimeout(timer);
+  timer = undefined;
+  clearTimeout(busyTimer);
+  busyTimer = undefined;
+  busy = false;
+  rendering = null;
+  if (liveFlushTimer) {
+    clearInterval(liveFlushTimer);
+    liveFlushTimer = undefined;
+  }
+  if (historyPoll) {
+    clearInterval(historyPoll);
+    historyPoll = undefined;
+  }
+}
+
+function resumeRenderer(): void {
+  if (!paused) return;
+  paused = false;
+  if (liveUnsub) liveFlushTimer = setInterval(flushLive, LIVE_FLUSH_MS);
+  historyPoll = setInterval(() => {
+    if (settings.enabled && settings.source === "history") schedule();
+  }, POLL_MS);
+  schedule();
+}
+
 let livePosition: [number, number] | null = null;
 let liveDepth: number | null = null;
 let liveHeading: number | undefined;
@@ -362,7 +399,7 @@ function sampleLive(): void {
 }
 
 function flushLive(): void {
-  if (pendingLive.length === 0) return;
+  if (paused || pendingLive.length === 0) return;
   const live = pendingLive;
   pendingLive = [];
   // Fold the new soundings into the worker's field. No tile re-fetch, and the
@@ -375,7 +412,7 @@ function flushLive(): void {
 // ******** frame cycle ********
 
 function draw(live = false): void {
-  if (busy || !lastReq || !settings.enabled) return;
+  if (paused || busy || !lastReq || !settings.enabled) return;
   if (live && Date.now() - lastLiveAt < liveInterval) return;
   busy = true;
   rendering = lastReq;
@@ -476,6 +513,13 @@ await client.subscribe(["state.changed"], () => void loadSettings());
 await loadMeta();
 await loadSettings();
 await loadUnits();
-setInterval(() => {
+historyPoll = setInterval(() => {
   if (settings.enabled && settings.source === "history") schedule();
 }, POLL_MS);
+
+// The iframe's visibility mirrors the top-level tab, so this fires when the
+// user switches tabs or backgrounds the browser.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") pauseRenderer();
+  else resumeRenderer();
+});
