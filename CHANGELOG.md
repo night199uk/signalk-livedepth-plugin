@@ -4,6 +4,26 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.15] - 2026-11-01
+
+### Fixed
+
+- **The layer no longer freezes into large blocks after the tab is left in the
+  background.** Chromium can evict a hidden tab's WebGL context; the worker
+  kept drawing into the dead context, so the next frame was garbage and every
+  render after it failed. A lost context is now detected, the renderer is
+  re-initialised and the depth field re-uploaded, and the frame cycle is reset
+  if the worker stops answering.
+
+### Changed
+
+- **A hidden tab parks all rendering work.** On `visibilitychange` the frame
+  cycle, live flush, history poll and tile fetches stop until the tab is shown
+  again, so a background Freeboard stays close to idle (and is far less likely
+  to lose its context in the first place).
+- The overlay view is padded to match the host's 10% margin, so a pan inside
+  the host's cached frame no longer forces a re-render.
+
 ## [0.3.13] - 2026-10-26
 
 ### Changed
