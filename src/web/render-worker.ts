@@ -192,7 +192,8 @@ function compile(
 }
 
 function initWebgl(): boolean {
-  if (gl) return true;
+  if (gl && !gl.isContextLost()) return true;
+  if (gl) releaseGpu();
   glCanvas = new OffscreenCanvas(1, 1);
   const msaa = settings?.msaa ?? true;
   const ctx = glCanvas.getContext("webgl2", {
@@ -201,6 +202,15 @@ function initWebgl(): boolean {
     antialias: msaa,
   }) as WebGL2RenderingContext | null;
   if (!ctx) return false;
+  // A backgrounded tab can have its WebGL context evicted. Without this the
+  // worker keeps drawing into a dead context and the next frame is garbage
+  // (the surface dissolves into large blocks). Prevent default so the browser
+  // may restore it, drop the GPU state and re-upload the field on re-init.
+  ctx.canvas.addEventListener("webglcontextlost", (event) => {
+    event.preventDefault();
+    releaseGpu();
+    fieldDirty = true;
+  });
   gpuMsaa = msaa;
   const vs = compile(ctx, ctx.VERTEX_SHADER, DEPTH_VERT_SRC);
   const fs = compile(ctx, ctx.FRAGMENT_SHADER, DEPTH_FRAG_SRC);

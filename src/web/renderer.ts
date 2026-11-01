@@ -106,6 +106,9 @@ let showFootprint = false;
 let baseSamples: DepthSample[] = [];
 let lastReq: RenderRequest | null = null;
 let busy = false;
+/** Reset the frame cycle if the worker stops answering (a dead or evicted
+ * worker would otherwise leave `busy` set and freeze the overlay). */
+let busyTimer: ReturnType<typeof setTimeout> | undefined;
 let dirty = false;
 /** The request currently being rendered. Its frame carries this request's own
  * id and extent, even if a newer one arrives mid-render, so the host refuses a
@@ -378,8 +381,25 @@ function draw(live = false): void {
   rendering = lastReq;
   renderingLive = live;
   dirty = false;
+  clearTimeout(busyTimer);
+  busyTimer = setTimeout(() => {
+    if (!busy) return;
+    console.warn("[LiveDepth] render worker did not answer; retrying");
+    busy = false;
+    rendering = null;
+    if (lastReq) draw();
+  }, 4000);
   worker.postMessage({ type: "render", req: rendering });
 }
+
+worker.onerror = (e) => {
+  console.warn("[LiveDepth] render worker error:", e.message);
+  clearTimeout(busyTimer);
+  busy = false;
+  rendering = null;
+  dirty = true;
+  if (lastReq) draw();
+};
 
 worker.onmessage = (e: MessageEvent<RenderWorkerOut>) => {
   const msg = e.data;
@@ -388,6 +408,7 @@ worker.onmessage = (e: MessageEvent<RenderWorkerOut>) => {
     perfFrameMs = msg.frameMs;
     return;
   }
+  clearTimeout(busyTimer);
   const req = rendering;
   const live = renderingLive;
   busy = false;
