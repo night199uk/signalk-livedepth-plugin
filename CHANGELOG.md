@@ -4,6 +4,17 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.17] - 2026-11-01
+
+### Fixed
+
+- **The extension no longer disappears after saving the plugin configuration.**
+  Saving stops and starts the plugin, and the server unregisters a plugin's
+  resource providers on stop. Registration was guarded by a module-level flag
+  that outlived the restart, so the extension dropped out of
+  `/signalk/v2/api/resources/plotterExtensions` even though depth collection
+  resumed. The provider is now registered on every start.
+
 ## [0.3.16] - 2026-11-01
 
 ### Added
