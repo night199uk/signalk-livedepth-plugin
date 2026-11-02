@@ -2,8 +2,6 @@
  * them), the runtime (which applies them) and the render Worker (which draws
  * with them). Persisted in host state under the extension scope. */
 
-export type DepthSource = "history" | "tiles";
-
 /** Overlay render quality. `auto` measures the worker's own frame cost and
  * scales to a budget; the rest pin a scale, so a weak GPU (a laptop iGPU) can
  * be dialled down and a fast one dialled up. */
@@ -11,9 +9,6 @@ export type DepthQuality = "auto" | "high" | "balanced" | "low";
 
 export interface LiveDepthSettings {
   enabled: boolean;
-  /** Where the soundings come from: the server's History API (the vessel's own
-   * recent track) or the plugin's gridded bathymetry tiles. */
-  source: DepthSource;
   /** Overlay render quality (see {@link DepthQuality}). */
   quality: DepthQuality;
   /** Render the shaded surface at the host's full requested size, ignoring the
@@ -35,10 +30,6 @@ export interface LiveDepthSettings {
   majorContourColor: string;
   /** Minor isobar colour (CSS). */
   minorContourColor: string;
-  /** History look-back window, in hours. */
-  historyWindowHours: number;
-  /** History sample interval, in seconds. */
-  historyResolutionS: number;
   /** Depth (metres) the shading runs to; deeper is left to the chart. */
   shadeLimitMetres: number;
   /** Depth (metres) between major isobaths (the index contours). */
@@ -63,7 +54,6 @@ export interface LiveDepthSettings {
 
 export const DEFAULT_SETTINGS: LiveDepthSettings = {
   enabled: true,
-  source: "history",
   quality: "auto",
   fullResolution: true,
   vectorContours: true,
@@ -73,8 +63,6 @@ export const DEFAULT_SETTINGS: LiveDepthSettings = {
   minorContourWidthPx: 0.75,
   majorContourColor: "#000000",
   minorContourColor: "#9aa4a8",
-  historyWindowHours: 1,
-  historyResolutionS: 0.1,
   shadeLimitMetres: 10,
   contourIntervalMetres: 1.524,
   minorContourMetres: 0.3048,
@@ -96,7 +84,6 @@ export const QUALITY_SCALE: Record<Exclude<DepthQuality, "auto">, number> = {
 /** The allowed values of the settings that are a closed set of strings. */
 const ENUM_VALUES: Partial<Record<keyof LiveDepthSettings, readonly string[]>> =
   {
-    source: ["history", "tiles"],
     quality: ["auto", "high", "balanced", "low"],
   };
 
@@ -104,8 +91,6 @@ const ENUM_VALUES: Partial<Record<keyof LiveDepthSettings, readonly string[]>> =
 export const SETTINGS_BOUNDS: Partial<
   Record<keyof LiveDepthSettings, { min: number; max: number; step: number }>
 > = {
-  historyWindowHours: { min: 0.1, max: 168, step: 0.1 },
-  historyResolutionS: { min: 0.01, max: 60, step: 0.01 },
   shadeLimitMetres: { min: 1, max: 200, step: 1 },
   contourIntervalMetres: { min: 0.3048, max: 50, step: 0.3048 },
   minorContourMetres: { min: 0.3048, max: 50, step: 0.3048 },
@@ -119,7 +104,12 @@ export const SETTINGS_BOUNDS: Partial<
   safetyDepthMetres: { min: 0, max: 50, step: 0.5 },
 };
 
-/** Merge stored state over the defaults, ignoring unknown/ill-typed keys. */
+/** Merge stored state over the defaults, ignoring unknown/ill-typed keys.
+ *
+ * This also migrates state saved by an older version that offered the History
+ * API as a depth source: `source` (and its `historyWindowHours` /
+ * `historyResolutionS` companions) no longer exist, so they are dropped and the
+ * layer always draws the plugin's bathymetry grid. */
 export function mergeSettings(
   stored: Record<string, unknown> | undefined,
 ): LiveDepthSettings {

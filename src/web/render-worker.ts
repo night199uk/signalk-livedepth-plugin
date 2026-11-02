@@ -27,10 +27,7 @@ import {
   type ContourSegment,
   type ContourSet,
 } from "./shared/contours.js";
-import {
-  DEFAULT_COVERAGE_MIN_M,
-  medianConsecutiveGap,
-} from "./shared/bathymetry.js";
+import {} from "./shared/bathymetry.js";
 import {
   SHADE_CONTOUR_LEVELS,
   depthClusters,
@@ -383,9 +380,8 @@ function rebuildField(): void {
   // Tile samples are already gridded, not along-track ordered, so a
   // consecutive-gap estimate is meaningless; the target cell size is the field
   // resolution instead.
-  const tiles = settings.source === "tiles";
-  const gap = tiles ? 0 : medianConsecutiveGap(source);
-  const minCover = tiles ? 0 : DEFAULT_COVERAGE_MIN_M;
+  const gap = 0;
+  const minCover = 0;
   const maxCells = Math.max(
     64,
     Math.round(settings.fieldCells) || MAX_FIELD_CELLS,

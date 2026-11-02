@@ -25,7 +25,7 @@ export interface RenderRequest {
 }
 
 export type RenderWorkerIn =
-  /** The server-derived soundings (tiles or history), replacing the whole set;
+  /** The server-derived grid soundings, replacing the whole set;
    * the field is rebuilt around these. */
   | { type: "base"; samples: DepthSample[] }
   /** New own-vessel soundings to fold in, appended to the base; only the cells
