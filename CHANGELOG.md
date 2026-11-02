@@ -4,6 +4,17 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.18] - 2026-11-02
+
+### Changed
+
+- **The layer now always draws the plugin's bathymetry grid.** The History API
+  is no longer offered as a depth source in the layer's settings; the source
+  selector and its history-only window/interval fields are gone. The separate
+  History import in the plugin's server settings is unchanged — that is what
+  seeds the grid. Settings saved with the old History source migrate
+  automatically.
+
 ## [0.3.17] - 2026-11-01
 
 ### Fixed
