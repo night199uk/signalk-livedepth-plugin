@@ -2,11 +2,10 @@
 // plugin is enabled. It owns the soundings, asks its render Worker for a frame
 // on each `overlay.request`, and answers with `overlay.frame`.
 //
-// Data has two sources, matching the plugin's two modes: the server's History
-// API (the vessel's own recent track) or the plugin's gridded bathymetry tiles
-// — both reached over same-origin REST, since the runtime is served by the same
-// server as the data. The own vessel's live position + depth arrive over the
-// bus (`signalk.subscribe`) and extend the tile source in place.
+// Data comes from the plugin's gridded bathymetry tiles, reached over
+// same-origin REST since the runtime is served by the same server. The own
+// vessel's live position + depth arrive over the bus (`signalk.subscribe`) and
+// extend the grid in place.
 
 import { connectExtension } from "signalk-plotterext-bus/extension";
 import type {
@@ -14,7 +13,6 @@ import type {
   OverlayStateEvent,
 } from "signalk-plotterext-bus/extension";
 import type { DepthSample } from "./shared/live-depth.js";
-import { historyValuesQuery, parseDepthSeries } from "./shared/live-depth.js";
 import {
   DEFAULT_SETTINGS,
   mergeSettings,
@@ -74,8 +72,6 @@ function boundsContain(
     inner[3] <= outer[3]
   );
 }
-/** How often the history source is refreshed while the layer is visible. */
-const POLL_MS = 15000;
 /** Most tile fetches a single view may need before the layer draws nothing. */
 const MAX_TILE_FETCHES = 24;
 /** How long live soundings are batched before folding into the client store.
@@ -101,7 +97,7 @@ let depthPath = DEFAULT_DEPTH_PATH;
 let vessel: { loa?: number; beam?: number } = {};
 let showFootprint = false;
 
-/** The server-derived soundings (tiles or history); the worker folds the live
+/** The server-derived grid soundings; the worker folds the live
  * own-vessel soundings onto these. */
 let baseSamples: DepthSample[] = [];
 let lastReq: RenderRequest | null = null;
@@ -129,7 +125,6 @@ let framesSince = Date.now();
 let timer: ReturnType<typeof setTimeout> | undefined;
 /** True while the tab is hidden: no frames, no fetches, no timers. */
 let paused = false;
-let historyPoll: ReturnType<typeof setInterval> | undefined;
 
 // Own-vessel soundings buffered since the last flush, sent to the worker to be
 // folded into the field.
@@ -146,13 +141,7 @@ async function loadSettings(): Promise<void> {
     settings = { ...DEFAULT_SETTINGS };
   }
   worker.postMessage({ type: "settings", settings });
-  // The live extension belongs to the tile source only; start or stop it as the
-  // source changes, so switching depth source takes effect.
-  if (settings.source === "tiles") {
-    startLive();
-  } else {
-    stopLive();
-  }
+  startLive();
   schedule();
 }
 
@@ -171,7 +160,7 @@ async function loadMeta(): Promise<void> {
     showFootprint = meta.debug?.vesselFootprint === true;
     publishVessel();
   } catch {
-    // No plugin meta: the history source still works, uncorrected.
+    // No plugin meta: soundings are drawn uncorrected.
   }
 }
 
@@ -199,30 +188,6 @@ async function loadUnits(): Promise<void> {
   } catch {
     // No units capability: the labels stay in metres.
   }
-}
-
-async function fetchHistory(): Promise<void> {
-  const windowMs = settings.historyWindowHours * 3600000;
-  const to = Date.now();
-  const query = historyValuesQuery({
-    depthPath,
-    from: to - windowMs,
-    to,
-    resolution: Number(settings.historyResolutionS.toPrecision(3)),
-  });
-  const res = await fetch(`/signalk/v2/api/history/values?${query}`, {
-    credentials: "same-origin",
-  });
-  if (!res.ok) return;
-  const rows = parseDepthSeries(await res.json(), depthPath);
-  const out: DepthSample[] = [];
-  for (const row of rows) {
-    if (!row.position) continue;
-    const { lon, lat } = correct(row.position[0], row.position[1], row.heading);
-    out.push({ lon, lat, depth: row.depth });
-  }
-  baseSamples = out;
-  publishBase();
 }
 
 async function fetchTiles(req: RenderRequest): Promise<void> {
@@ -269,11 +234,7 @@ function schedule(): void {
 
 async function refresh(): Promise<void> {
   if (paused || !settings.enabled) return;
-  if (settings.source === "history") {
-    await fetchHistory();
-  } else if (lastReq) {
-    await fetchTiles(lastReq);
-  }
+  if (lastReq) await fetchTiles(lastReq);
 }
 
 /** Hand the worker the server-derived soundings; it rebuilds the field around
@@ -285,12 +246,12 @@ function publishBase(): void {
   if (lastReq) draw(true);
 }
 
-// ******** live extension (tiles source) ********
+// ******** live extension ********
 
 let liveUnsub: (() => Promise<void>) | undefined;
 
 function startLive(): void {
-  if (settings.source !== "tiles" || liveUnsub) return;
+  if (liveUnsub) return;
   void client.signalk
     .subscribe(
       ["navigation.position", depthPath, "navigation.headingTrue"],
@@ -357,19 +318,12 @@ function pauseRenderer(): void {
     clearInterval(liveFlushTimer);
     liveFlushTimer = undefined;
   }
-  if (historyPoll) {
-    clearInterval(historyPoll);
-    historyPoll = undefined;
-  }
 }
 
 function resumeRenderer(): void {
   if (!paused) return;
   paused = false;
   if (liveUnsub) liveFlushTimer = setInterval(flushLive, LIVE_FLUSH_MS);
-  historyPoll = setInterval(() => {
-    if (settings.enabled && settings.source === "history") schedule();
-  }, POLL_MS);
   schedule();
 }
 
@@ -492,7 +446,7 @@ await client.subscribe(["overlay.request"], (_name, payload) => {
   // The tiles are view-dependent: a settled pan/zoom needs the tiles covering
   // its own bbox. Without this the layer keeps drawing the tile set fetched for
   // the previous view, which is why panning showed only partial tracks.
-  if (settings.source === "tiles") schedule();
+  schedule();
   draw();
 });
 
@@ -513,9 +467,6 @@ await client.subscribe(["state.changed"], () => void loadSettings());
 await loadMeta();
 await loadSettings();
 await loadUnits();
-historyPoll = setInterval(() => {
-  if (settings.enabled && settings.source === "history") schedule();
-}, POLL_MS);
 
 // The iframe's visibility mirrors the top-level tab, so this fires when the
 // user switches tabs or backgrounds the browser.

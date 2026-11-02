@@ -5,8 +5,7 @@
 // contexts.
 //
 // Depth-valued settings are shown in the user's preferred depth unit
-// (`units.get`) and stored in metres; the history-only settings are greyed while
-// the depth source is the plugin's tiles.
+// (`units.get`) and stored in metres.
 
 import { connectExtension } from "signalk-plotterext-bus/extension";
 import {
@@ -14,7 +13,6 @@ import {
   SETTINGS_BOUNDS,
   mergeSettings,
   type DepthQuality,
-  type DepthSource,
   type LiveDepthSettings,
 } from "./shared/settings.js";
 
@@ -35,25 +33,9 @@ interface Field {
   suffix?: string;
   /** Shown in the user's depth unit, stored in metres. */
   depth?: boolean;
-  /** Only meaningful for the History source; greyed while the source is tiles. */
-  historyOnly?: boolean;
 }
 
 const FIELDS: Field[] = [
-  {
-    key: "historyWindowHours",
-    label: "History window",
-    hint: "How far back to fetch depth.",
-    suffix: "h",
-    historyOnly: true,
-  },
-  {
-    key: "historyResolutionS",
-    label: "Sample interval",
-    hint: "Seconds between depth samples; smaller is finer.",
-    suffix: "s",
-    historyOnly: true,
-  },
   {
     key: "shadeLimitMetres",
     label: "Shade limit",
@@ -200,20 +182,6 @@ const fromDisplay = (value: number) =>
   depthUnit === "foot" ? value * METRES_PER_FOOT : value;
 const round = (v: number) => Math.round(v * 100) / 100;
 
-const historyRows: HTMLElement[] = [];
-const historyInputs: HTMLInputElement[] = [];
-
-/** Grey the history-only fields while the source is the plugin's tiles. */
-function syncHistoryDisabled(): void {
-  const disabled = settings.source === "tiles";
-  for (const input of historyInputs) {
-    input.disabled = disabled;
-  }
-  for (const row of historyRows) {
-    row.classList.toggle("disabled", disabled);
-  }
-}
-
 /** The bounds a field is shown and clamped with, in the unit it is shown in.
  * A depth setting is stored in metres but read in the user's unit; converting
  * the metre bounds outright gives awkward values in feet (0.5 m = 1.64 ft), so
@@ -276,10 +244,6 @@ function numberField(field: Field): HTMLElement {
     wrap.appendChild(hint);
   }
 
-  if (field.historyOnly) {
-    historyRows.push(wrap);
-    historyInputs.push(input);
-  }
   return wrap;
 }
 
@@ -308,8 +272,6 @@ function toggleField(toggle: Toggle): HTMLElement {
 
 function build(): void {
   root.replaceChildren();
-  historyRows.length = 0;
-  historyInputs.length = 0;
 
   const heading = document.createElement("h2");
   heading.textContent = "LiveDepth";
@@ -329,36 +291,6 @@ function build(): void {
   });
   enabled.append(enabledName, enabledInput);
   root.appendChild(enabled);
-
-  const source = document.createElement("label");
-  source.className = "field";
-  const sourceName = document.createElement("span");
-  sourceName.className = "name";
-  sourceName.textContent = "Depth source";
-  const select = document.createElement("select");
-  for (const [value, label] of [
-    ["history", "History (this vessel's track)"],
-    ["tiles", "LiveDepth plugin tiles"],
-  ] as [DepthSource, string][]) {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = label;
-    option.selected = settings.source === value;
-    select.appendChild(option);
-  }
-  select.addEventListener("change", () => {
-    settings.source = select.value as DepthSource;
-    syncHistoryDisabled();
-    void save();
-  });
-  source.append(sourceName, select);
-  const sourceHint = document.createElement("span");
-  sourceHint.className = "hint";
-  sourceHint.textContent =
-    "History draws the vessel's own recorded track; tiles draw the " +
-    "server-built bathymetry store, extended live.";
-  source.appendChild(sourceHint);
-  root.appendChild(source);
 
   for (const field of FIELDS) {
     if (!graphicsFieldKeys.has(field.key)) {
@@ -390,7 +322,6 @@ function build(): void {
       }
     }
   }
-  syncHistoryDisabled();
 }
 
 function colorField(field: ColorField): HTMLElement {
