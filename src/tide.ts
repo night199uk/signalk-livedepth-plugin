@@ -143,13 +143,16 @@ export async function createSlackwaterTideProvider(): Promise<TideProvider> {
     ).toFixed(2)}`;
     let predictor = predictors.get(key);
     if (!predictor) {
-      predictor = nearestStation({
-        latitude: lat,
-        longitude: lon,
-        maxDistance: MAX_STATION_KM,
-      })
-        .then((station) => (hasTideModel(station) ? station : undefined))
-        .catch(() => undefined);
+      predictor = (async () => {
+        // Slackwater returns the predictor synchronously in older betas and as
+        // a promise in newer ones; `await` accepts either.
+        const station = await nearestStation({
+          latitude: lat,
+          longitude: lon,
+          maxDistance: MAX_STATION_KM,
+        });
+        return hasTideModel(station) ? station : undefined;
+      })().catch(() => undefined);
       predictors.set(key, predictor);
       if (predictors.size > STATION_CACHE_MAX) {
         const oldest = predictors.keys().next().value;
