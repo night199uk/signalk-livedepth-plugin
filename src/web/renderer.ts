@@ -5,7 +5,9 @@
 // Data comes from the plugin's gridded bathymetry tiles, reached over
 // same-origin REST since the runtime is served by the same server. The own
 // vessel's live position + depth arrive over the bus (`signalk.subscribe`) and
-// extend the grid in place.
+// extend the grid in place. When the plugin stores depths relative to a tide
+// datum, the raw live depths are not folded in; the corrected tiles are
+// re-fetched instead.
 
 import { connectExtension } from "signalk-plotterext-bus/extension";
 import type {
@@ -80,6 +82,10 @@ const MAX_TILE_FETCHES = 24;
 const LIVE_FLUSH_MS = 300;
 /** Depth path when the plugin advertises none. */
 const DEFAULT_DEPTH_PATH = "environment.depth.belowTransducer";
+/** How often to pull the server's tide-corrected tiles while soundings arrive.
+ * The client cannot correct its own live depth, so it renders the corrected
+ * server grid instead of folding raw soundings onto it. */
+const LIVE_TILE_REFRESH_MS = 10_000;
 
 const client = await connectExtension();
 // Version the worker URL so a plugin update (a new deploy) is never served
@@ -96,6 +102,17 @@ let depthPath = DEFAULT_DEPTH_PATH;
  * plugin's meta. */
 let vessel: { loa?: number; beam?: number } = {};
 let showFootprint = false;
+/** Whether the server stores depths relative to a tide datum. If so, the
+ * client must not fold its own raw soundings onto the corrected grid. */
+let tideCorrected = false;
+/** A live depth has arrived since the last corrected-tile refresh. */
+let liveTilesDirty = false;
+let liveTilesTimer: ReturnType<typeof setInterval> | undefined;
+/** Where the vessel was when the corrected tiles were last pulled, so an
+ * anchored boat does not re-fetch the same unchanged cells every tick. */
+let tilesRefreshAt: [number, number] | null = null;
+/** How far the vessel must move before corrected tiles are worth re-pulling. */
+const TILE_REFRESH_METRES = 10;
 
 /** The server-derived grid soundings; the worker folds the live
  * own-vessel soundings onto these. */
@@ -158,6 +175,14 @@ async function loadMeta(): Promise<void> {
     if (meta.depthPath) depthPath = meta.depthPath;
     vessel = meta.vessel ?? {};
     showFootprint = meta.debug?.vesselFootprint === true;
+    const wasCorrected = tideCorrected;
+    tideCorrected = meta.tide !== undefined && meta.tide.mode !== "off";
+    // The live wiring depends on this: restart it if the datum appeared after a
+    // state event already started it.
+    if (wasCorrected !== tideCorrected && liveUnsub) {
+      stopLive();
+      startLive();
+    }
     publishVessel();
   } catch {
     // No plugin meta: soundings are drawn uncorrected.
@@ -276,6 +301,7 @@ function startLive(): void {
           }
         } else if (ev.path === depthPath && typeof ev.value === "number") {
           liveDepth = ev.value;
+          if (tideCorrected) liveTilesDirty = true;
         } else if (
           ev.path === "navigation.headingTrue" &&
           typeof ev.value === "number"
@@ -292,13 +318,52 @@ function startLive(): void {
     .catch(() => {});
   clearInterval(liveFlushTimer);
   liveFlushTimer = setInterval(flushLive, LIVE_FLUSH_MS);
+  clearInterval(liveTilesTimer);
+  liveTilesTimer = tideCorrected
+    ? setInterval(refreshTiles, LIVE_TILE_REFRESH_MS)
+    : undefined;
 }
 
 function stopLive(): void {
   clearInterval(liveFlushTimer);
   liveFlushTimer = undefined;
+  clearInterval(liveTilesTimer);
+  liveTilesTimer = undefined;
   void liveUnsub?.();
   liveUnsub = undefined;
+}
+
+/** Re-pull the served tiles so tide-corrected soundings reach the layer. */
+function refreshTiles(): void {
+  if (paused || !settings.enabled || !lastReq || !liveTilesDirty) return;
+  // At anchor the corrected cells barely change; wait until the vessel has
+  // moved far enough to reach new ones. The dirty flag stays set.
+  if (
+    livePosition &&
+    tilesRefreshAt &&
+    !movedMetres(livePosition, tilesRefreshAt, TILE_REFRESH_METRES)
+  ) {
+    return;
+  }
+  liveTilesDirty = false;
+  tilesRefreshAt = livePosition ? [...livePosition] : null;
+  fetchedBounds = null;
+  void refresh();
+}
+
+/** Whether two `[lon, lat]` points are at least `metres` apart (small-distance
+ * approximation, ample for a refresh threshold). */
+function movedMetres(
+  a: [number, number],
+  b: [number, number],
+  metres: number,
+): boolean {
+  const mPerDegLat = 111_320;
+  const mPerDegLon =
+    mPerDegLat * Math.cos((((a[1] + b[1]) / 2) * Math.PI) / 180);
+  const dx = (a[0] - b[0]) * mPerDegLon;
+  const dy = (a[1] - b[1]) * mPerDegLat;
+  return Math.hypot(dx, dy) >= metres;
 }
 
 /** Stop all rendering work while the tab is hidden. A backgrounded tab is
@@ -318,12 +383,19 @@ function pauseRenderer(): void {
     clearInterval(liveFlushTimer);
     liveFlushTimer = undefined;
   }
+  clearInterval(liveTilesTimer);
+  liveTilesTimer = undefined;
 }
 
 function resumeRenderer(): void {
   if (!paused) return;
   paused = false;
-  if (liveUnsub) liveFlushTimer = setInterval(flushLive, LIVE_FLUSH_MS);
+  if (liveUnsub) {
+    liveFlushTimer = setInterval(flushLive, LIVE_FLUSH_MS);
+    if (tideCorrected) {
+      liveTilesTimer = setInterval(refreshTiles, LIVE_TILE_REFRESH_MS);
+    }
+  }
   schedule();
 }
 
@@ -347,7 +419,9 @@ function publishVessel(): void {
 }
 
 function sampleLive(): void {
-  if (!livePosition || liveDepth === null) return;
+  // Corrected grids must not receive this vessel's raw depth: the server tiles
+  // already carry the tide-corrected soundings.
+  if (tideCorrected || !livePosition || liveDepth === null) return;
   const { lon, lat } = correct(livePosition[0], livePosition[1], liveHeading);
   pendingLive.push({ lon, lat, depth: liveDepth });
 }

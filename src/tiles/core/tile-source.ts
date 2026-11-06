@@ -32,6 +32,11 @@ export interface TileMeta {
   transducer?: TransducerOffset | null;
   /** Vessel dimensions, for the debug footprint overlay. */
   vessel?: { loa?: number; beam?: number };
+  /** The vertical datum stored depths are relative to. `mode` is `"off"` when
+   * soundings are raw below-surface, otherwise the datum name (`LAT`, `MLLW`,
+   * `chart`). A client must not fold its own uncorrected soundings onto a
+   * corrected grid; it refreshes the served tiles instead. */
+  tide?: { mode: string };
   /** Temporary debug flags; see the plugin's debug config. */
   debug?: { vesselFootprint?: boolean };
 }

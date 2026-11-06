@@ -4,7 +4,17 @@ import { TransducerOffset, TileStore } from "./tiles/core/index.js";
 import { schema, Config } from "./config.js";
 import { createTileDB, createTileStore } from "./tiles/store.js";
 import { createTileWriter } from "./tiles/writer.js";
-import { seedFromHistory } from "./tiles/seed.js";
+import { SEED_CURSOR_KEY, seedFromHistory } from "./tiles/seed.js";
+import {
+  TIDE_MODE_KEY,
+  TideCorrection,
+  TideMode,
+  createSlackwaterTideProvider,
+  createTideCorrection,
+  datumLabel,
+  shouldResetGrid,
+  tideMode,
+} from "./tide.js";
 import {
   registerBathymetryRoutes,
   registerSeedRoutes,
@@ -93,6 +103,11 @@ export function resolveTransducerOffset(
   };
 }
 
+/** A parenthetical for rows dropped because the tide was unavailable. */
+function skipNote(skipped: number): string {
+  return skipped > 0 ? ` (${skipped} skipped: no tide prediction)` : "";
+}
+
 export default function createPlugin(app: ServerAPI): Plugin {
   let abortController: AbortController | undefined = undefined;
   // The gridded store served to chart clients. Built in start(), read by the
@@ -100,6 +115,9 @@ export default function createPlugin(app: ServerAPI): Plugin {
   let tileStore: TileStore | undefined;
   let config: Config | undefined;
   let transducer: TransducerOffset | undefined;
+  let tide: TideCorrection | undefined;
+  /** The datum the store is in; also reported to chart clients. */
+  let tideState: TideMode = "off";
   let seedStatus: SeedStatus = { running: false };
   let running = false;
   let routesRegistered = false;
@@ -109,6 +127,16 @@ export default function createPlugin(app: ServerAPI): Plugin {
     const store = tileStore;
     const cfg = config;
     if (!store || !cfg) return;
+    // The store's datum is fixed once it holds cells: fold history with the
+    // same correction it was built with, and refuse rather than write raw rows
+    // into a datum grid.
+    if (tideState !== "off" && !tide) {
+      seedStatus = { running: false, error: "tide model unavailable" };
+      app.setPluginError(
+        "Cannot rebuild from history: the tide model is unavailable, so raw depths would be stored in the wrong datum.",
+      );
+      return;
+    }
 
     seedStatus = { running: true };
     app.setPluginStatus("Rebuilding bathymetry tiles from history…");
@@ -119,17 +147,18 @@ export default function createPlugin(app: ServerAPI): Plugin {
         config: cfg,
         resolution,
         offset: transducer,
+        tide,
         signal: abortController?.signal,
         onProgress: (p) => {
           seedStatus = { running: !p.done, progress: p };
           app.setPluginStatus(
-            `Rebuilding bathymetry tiles: ${p.points} points over ${p.chunks} windows`,
+            `Rebuilding bathymetry tiles: ${p.points} points over ${p.chunks} windows${skipNote(p.skipped)}`,
           );
         },
       });
       seedStatus = { running: false, progress };
       app.setPluginStatus(
-        `Bathymetry rebuild complete: ${progress.points} points`,
+        `Bathymetry rebuild complete: ${progress.points} points${skipNote(progress.skipped)}`,
       );
     } catch (err) {
       seedStatus = { running: false, error: String(err) };
@@ -155,14 +184,66 @@ export default function createPlugin(app: ServerAPI): Plugin {
       );
       transducer = resolveTransducerOffset(app, config);
 
-      createCollector({
-        app,
-        config,
-        writer: createTileWriter(tileStore),
-        offset: transducer,
-        signal: abortController.signal,
-      });
-      app.setPluginStatus("Collecting depth into the bathymetry tile store");
+      // Build the tide source before the collector starts, so the first
+      // sounding already goes through it. The station database loads here, once.
+      const configured = tideMode(config);
+      tideState = configured;
+      tide = undefined;
+      let collecting = true;
+      if (configured !== "off") {
+        try {
+          tide = createTideCorrection(
+            await createSlackwaterTideProvider(),
+            configured,
+          );
+        } catch (err) {
+          // A transient model failure must not clear or relabel an existing
+          // grid, nor write raw depths into a datum grid. Keep the stored
+          // datum, record nothing, and surface the error.
+          collecting = false;
+          const stored = tileStore.getMeta(TIDE_MODE_KEY);
+          tideState = stored === undefined ? "off" : (stored as TideMode);
+          app.setPluginError(
+            `Tide correction is on but the tide model could not be loaded ` +
+              `(${err}); recording is paused and the existing grid is kept.`,
+          );
+        }
+      }
+
+      if (collecting) {
+        // The cells hold depths, not raw soundings, so a grid built in another
+        // datum cannot be corrected in place. Clearing is the only way to avoid
+        // silently mixing datums; the old seed cursor goes with it.
+        const reset = shouldResetGrid(
+          tileStore.getMeta(TIDE_MODE_KEY),
+          tideState,
+        );
+        if (reset) {
+          tileStore.clear();
+          tileStore.setMeta(SEED_CURSOR_KEY, "");
+        }
+        tileStore.setMeta(TIDE_MODE_KEY, tideState);
+
+        createCollector({
+          app,
+          config,
+          writer: createTileWriter(tileStore),
+          offset: transducer,
+          tide,
+          signal: abortController.signal,
+        });
+        app.setPluginStatus(
+          tideState === "off"
+            ? "Collecting depth into the bathymetry tile store"
+            : `Collecting depth into the bathymetry tile store, relative to ${datumLabel(tideState)}`,
+        );
+        if (reset) {
+          app.setPluginStatus(
+            "The tide datum changed, so the bathymetry grid was cleared. " +
+              "Rebuild from history to repopulate it.",
+          );
+        }
+      }
 
       running = true;
       // Offer the chart layer to a host chartplotter, and serve the store the
@@ -173,7 +254,10 @@ export default function createPlugin(app: ServerAPI): Plugin {
           app,
           () => tileStore,
           () => ({
-            depthPath: config ? `environment.depth.${config.path}` : undefined,
+            depthPath: config
+              ? `environment.depth.${tideState === "off" ? config.path : "belowSurface"}`
+              : undefined,
+            tide: { mode: tideState },
             transducer,
             vessel: {
               loa: readLengthOverall(app),
@@ -187,7 +271,7 @@ export default function createPlugin(app: ServerAPI): Plugin {
         routesRegistered = true;
       }
 
-      if (startConfig.seed?.run) {
+      if (collecting && startConfig.seed?.run) {
         // One-time rebuild. Clear the trigger when it finishes (or fails) so it
         // doesn't fire again on the next start; an interrupted run resumes from
         // the stored cursor instead of repeating.

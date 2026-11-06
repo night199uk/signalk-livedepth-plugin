@@ -44,3 +44,21 @@ test("the depth options include the custom tide-compensated paths", () => {
     s.properties.path.enum.length,
   );
 });
+
+test("the tide settings offer a switch and the fixed datums", () => {
+  const s = schema(appReturning(undefined)) as unknown as {
+    properties: {
+      tide: {
+        properties: {
+          enabled: { default?: boolean };
+          datum: { enum: string[]; enumNames: string[]; default?: string };
+        };
+      };
+    };
+  };
+  const tide = s.properties.tide.properties;
+  expect(tide.enabled.default).toBe(false);
+  expect(tide.datum.enum).toEqual(["chart", "LAT", "MLLW"]);
+  expect(tide.datum.enumNames).toHaveLength(tide.datum.enum.length);
+  expect(tide.datum.default).toBe("LAT");
+});

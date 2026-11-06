@@ -323,3 +323,22 @@ test("drops a co-located vessel's implausible depth (tender on davits)", async (
     [`vessels.${NEAR_OK}`, `vessels.${FAR}`].sort(),
   );
 });
+
+test("records the raw below-surface depth when the path is overridden", () => {
+  const { app, subs } = fakeApp();
+  createLiveStream(
+    app,
+    { ...config, path: "belowKeel" },
+    undefined,
+    "environment.depth.belowSurface",
+  );
+  expect(subs.map((s) => s.context).sort()).toEqual(
+    [`vessels.${SELF}`, `vessels.${DINGHY}`].sort(),
+  );
+});
+
+test("a configured path that no vessel publishes is not recorded", () => {
+  const { app, subs } = fakeApp();
+  createLiveStream(app, { ...config, path: "belowKeel" });
+  expect(subs).toHaveLength(0);
+});

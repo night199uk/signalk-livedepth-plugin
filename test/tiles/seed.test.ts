@@ -1,6 +1,10 @@
 import { expect, test, vi } from "vitest";
 import { ServerAPI } from "@signalk/server-api";
-import type { HistoryApi, ValuesResponse } from "@signalk/server-api/history";
+import type {
+  HistoryApi,
+  ValuesRequest,
+  ValuesResponse,
+} from "@signalk/server-api/history";
 import { Temporal } from "@js-temporal/polyfill";
 import { Config } from "../../src/config.js";
 import {
@@ -12,6 +16,7 @@ import {
 } from "../../src/tiles/core/index.js";
 import { createTileDB, createTileStore } from "../../src/tiles/store.js";
 import { SEED_CURSOR_KEY, seedFromHistory } from "../../src/tiles/seed.js";
+import type { TideCorrection } from "../../src/tide.js";
 
 const app = {
   debug: () => {},
@@ -188,5 +193,116 @@ test("shifts soundings to the transducer when an offset is given", async () => {
   expect(store.read(BASE_ZOOM, cell.x, cell.y)?.size).toBe(1);
   const original = lngLatToCell(0, 0, BASE_ZOOM);
   expect(store.read(BASE_ZOOM, original.x, original.y)).toBeUndefined();
+  store.close();
+});
+
+test("reads below surface and corrects each row at its own time", async () => {
+  const store = createTileStore(createTileDB(":memory:"));
+  const from = Temporal.Instant.from("2024-01-01T00:00:00Z");
+  const to = from.add({ minutes: 30 });
+  const history = {
+    getValues: vi.fn(
+      async (): Promise<ValuesResponse> =>
+        ({
+          values: [
+            { path: "navigation.position" },
+            { path: "environment.depth.belowSurface" },
+          ],
+          data: [
+            ["2024-01-01T00:10:00Z", [0.001, 0.001], 12],
+            ["2024-01-01T00:20:00Z", [0.001, 0.001], 10],
+          ],
+        }) as unknown as ValuesResponse,
+    ),
+    getContexts: vi.fn(async () => ({})),
+    getPaths: vi.fn(async () => ({})),
+  } as unknown as HistoryApi;
+
+  const seen: string[] = [];
+  const tide: TideCorrection = {
+    async correct(_lon, _lat, time, depth) {
+      seen.push(time.toString());
+      return depth - 2;
+    },
+  };
+
+  const progress = await seedFromHistory({
+    app,
+    store,
+    // The configured path is already compensated by another plugin; with tide
+    // correction on the seed must still read the raw below-surface value.
+    config: { ...config, path: "belowSurfaceTideCompensatedLAT" },
+    from,
+    to,
+    chunkHours: 1,
+    history,
+    tide,
+  });
+
+  const requested = history.getValues.mock.calls[0][0] as ValuesRequest;
+  const paths = requested.pathSpecs.map((spec) => spec.path);
+  expect(paths).toContain("environment.depth.belowSurface");
+  expect(paths).not.toContain(
+    "environment.depth.belowSurfaceTideCompensatedLAT",
+  );
+
+  // Each row used its own instant, and both were reduced by their own level.
+  expect(seen).toEqual(["2024-01-01T00:10:00Z", "2024-01-01T00:20:00Z"]);
+  expect(progress.points).toBe(2);
+  expect(progress.skipped).toBe(0);
+  expect([...store.read(BASE_ZOOM, tile.x, tile.y)!.values()][0].depth).toBe(
+    800,
+  );
+  store.close();
+});
+
+test("a row with no tide prediction is skipped, not stored raw", async () => {
+  const store = createTileStore(createTileDB(":memory:"));
+  const from = Temporal.Instant.from("2024-01-01T00:00:00Z");
+  const to = from.add({ minutes: 30 });
+  const history = {
+    getValues: vi.fn(
+      async (): Promise<ValuesResponse> =>
+        ({
+          values: [
+            { path: "navigation.position" },
+            { path: "environment.depth.belowSurface" },
+          ],
+          data: [
+            ["2024-01-01T00:10:00Z", [0.001, 0.001], 4],
+            ["2024-01-01T00:20:00Z", [0.001, 0.001], 10],
+          ],
+        }) as unknown as ValuesResponse,
+    ),
+    getContexts: vi.fn(async () => ({})),
+    getPaths: vi.fn(async () => ({})),
+  } as unknown as HistoryApi;
+
+  let call = 0;
+  const tide: TideCorrection = {
+    async correct(_lon, _lat, _time, depth) {
+      call++;
+      return call === 1 ? undefined : depth - 2;
+    },
+  };
+
+  const progress = await seedFromHistory({
+    app,
+    store,
+    config,
+    from,
+    to,
+    chunkHours: 1,
+    history,
+    tide,
+  });
+
+  expect(progress.skipped).toBe(1);
+  expect(progress.points).toBe(1);
+  // Only the corrected 10 m row (8 m below datum) is present; the 4 m row was
+  // dropped rather than stored raw and shallowest.
+  expect([...store.read(BASE_ZOOM, tile.x, tile.y)!.values()][0].depth).toBe(
+    800,
+  );
   store.close();
 });
