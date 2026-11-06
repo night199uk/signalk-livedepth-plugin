@@ -68,8 +68,13 @@ export function createLiveStream(
   app: ServerAPI,
   config: Config,
   offset?: TransducerOffset,
+  /** Override the recorded depth path, e.g. the raw below-surface depth when
+   * tide correction is on. */
+  depthPathOverride?: string,
 ) {
-  const depthPath = `environment.depth.${config.path}` as Path;
+  const depthPath = (depthPathOverride ??
+    `environment.depth.${config.path}`) as Path;
+  const depthKey = depthPath.slice("environment.depth.".length);
   const include = new Set(config.vessels?.include ?? []);
   const exclude = new Set(config.vessels?.exclude ?? []);
   const selfUrn = app.getSelfPath("uuid") as string | undefined;
@@ -254,7 +259,7 @@ export function createLiveStream(
       if (unsubscribes.has(context) || !wanted(context)) continue;
       // A depth on the chosen datum is what makes a vessel worth recording;
       // AIS targets have a position but never a depth.
-      if (!node?.environment?.depth?.[config.path]) continue;
+      if (!node?.environment?.depth?.[depthKey]) continue;
       if (!node?.navigation?.position) continue;
       subscribe(context);
     }

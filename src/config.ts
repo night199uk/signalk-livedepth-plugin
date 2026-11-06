@@ -1,9 +1,18 @@
 import { ServerAPI } from "@signalk/server-api";
+import { TIDE_DATUMS, TideDatum } from "./tide.js";
 
 export type Config = {
-  /** Which depth datum to record. Signal K already publishes each relative to
-   * its own reference, so the value is stored as-is. */
+  /** Which depth measurement to record when tide correction is off. Signal K
+   * already publishes each relative to its own reference, so it is stored
+   * as-is. With tide correction on, the raw depth below the surface is used
+   * and reduced to {@link Config.tide.datum} instead. */
   path: (typeof DepthPaths)[number];
+  /** Reduce each sounding to a fixed vertical datum, using the predicted tide
+   * at that sounding's own time and position. */
+  tide?: {
+    enabled?: boolean;
+    datum?: TideDatum;
+  };
   /** The depth transducer's position on the hull: `y` from the bow, `x` from
    * the centreline (+starboard). Used only to place a sounding at the
    * transducer rather than at the position the server reports. */
@@ -69,7 +78,7 @@ export function schema(app: ServerAPI) {
         type: "string",
         title: "Depth",
         description:
-          "Which depth datum to record. Signal K publishes each relative to its own reference, so no draft or transducer offset is needed here.",
+          "Which depth measurement to record. Signal K publishes each relative to its own reference, so no draft or transducer offset is needed here. When tide correction is on, the raw depth below the surface is used instead and reduced to the chosen datum.",
         enum: DepthPaths,
         enumNames: [
           "Depth below surface",
@@ -80,6 +89,34 @@ export function schema(app: ServerAPI) {
           "Depth below surface (tide compensated, MLLW)",
         ],
         ...(defaultPath === undefined ? {} : { default: defaultPath }),
+      },
+      tide: {
+        type: "object",
+        title: "Tide correction",
+        description:
+          "Store soundings relative to a fixed vertical datum by subtracting the predicted tide at each sounding's own time and position. A depth below the surface rises and falls with the tide; a depth below a datum does not, so it still means the same thing when you return months later. When this is on, the raw depth below the surface is recorded and the Depth setting is ignored. Changing the datum clears the depth map, because the stored cells are depths in the old datum.",
+        properties: {
+          enabled: {
+            type: "boolean",
+            default: false,
+            title: "Correct samples for tides?",
+            description:
+              "Off records the selected Depth as measured. On records the depth below the surface reduced to the datum below.",
+          },
+          datum: {
+            type: "string",
+            title: "Datum",
+            enum: TIDE_DATUMS,
+            enumNames: [
+              "Chart datum / local datum",
+              "Lowest Astronomical Tide (LAT)",
+              "Mean Lower Low Water (MLLW)",
+            ],
+            default: "LAT",
+            description:
+              "LAT and MLLW are fixed references at each location, so a corrected sounding keeps its meaning wherever and whenever you return. Chart datum is set per chart region, so a map corrected to it cannot be compared across regions; LAT and MLLW are the predictable choices.",
+          },
+        },
       },
       sounder: {
         type: "object",

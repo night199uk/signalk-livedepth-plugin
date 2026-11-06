@@ -8,6 +8,7 @@ import { Temporal } from "@js-temporal/polyfill";
 import { Config } from "../config.js";
 import { BATHY_EPOCH } from "../constants.js";
 import { getHistoryAPI, columnsByPath } from "../history.js";
+import { TideCorrection, recordingDepthPath } from "../tide.js";
 import {
   TileStore,
   TransducerOffset,
@@ -29,6 +30,8 @@ export interface SeedProgress {
   chunks: number;
   chunksFailed: number;
   points: number;
+  /** Rows dropped because the tide was unavailable at their time/position. */
+  skipped: number;
   done: boolean;
 }
 
@@ -48,6 +51,8 @@ export interface SeedOptions {
   history?: HistoryApi;
   /** Shift each sounding from the recorded position to the transducer. */
   offset?: TransducerOffset;
+  /** Reduce each sounding to a fixed datum, using the row's own time. */
+  tide?: TideCorrection;
   signal?: AbortSignal;
   onProgress?: (progress: SeedProgress) => void;
 }
@@ -69,6 +74,7 @@ export async function seedFromHistory({
   chunkHours = DEFAULT_SEED_CHUNK_HOURS,
   history,
   offset,
+  tide,
   signal,
   onProgress,
 }: SeedOptions): Promise<SeedProgress> {
@@ -79,7 +85,10 @@ export async function seedFromHistory({
 
   const start = from ?? cursorFromStore(store) ?? BATHY_EPOCH;
 
-  const depthPath = `environment.depth.${config.path}`;
+  // With tide correction on, the raw below-surface depth is the base: the
+  // configured path may already be compensated (and only for this vessel now),
+  // which would double-correct a historical or imported sounding.
+  const depthPath = recordingDepthPath(config, tide !== undefined);
   // Deliberately NOT pinned to a source: the seed reconstructs the vessel's
   // whole track, and the active source changes over the record (different GPS
   // units over the years, e.g. raymarine.* in 2025 vs problem-child.* now).
@@ -117,6 +126,7 @@ export async function seedFromHistory({
     chunks: 0,
     chunksFailed: 0,
     points: 0,
+    skipped: 0,
     done: false,
   };
 
@@ -133,7 +143,16 @@ export async function seedFromHistory({
         resolution,
         pathSpecs,
       });
-      progress.points += fold(accumulator, res, depthPath, pathSpecs, offset);
+      const folded = await fold(
+        accumulator,
+        res,
+        depthPath,
+        pathSpecs,
+        offset,
+        tide,
+      );
+      progress.points += folded.points;
+      progress.skipped += folded.skipped;
       accumulator.flush();
       // Advance the cursor only after the chunk is safely written, so an
       // interrupted seed resumes where it stopped rather than from the start.
@@ -172,33 +191,38 @@ function cursorFromStore(store: TileStore): Temporal.Instant | undefined {
   }
 }
 
-/** Fold a values response's rows into the accumulator; returns points added. */
-function fold(
+/** Fold a values response's rows into the accumulator. */
+async function fold(
   accumulator: ReturnType<typeof createTileAccumulator>,
   res: ValuesResponse,
   depthPath: string,
   pathSpecs: ValuesRequest["pathSpecs"],
   offset?: TransducerOffset,
-): number {
+  tide?: TideCorrection,
+): Promise<{ points: number; skipped: number }> {
   const columns = columnsByPath(res.values, pathSpecs);
   const positionColumn = columns.get("navigation.position");
   const depthColumn = columns.get(depthPath);
   const headingColumn = columns.get("navigation.headingTrue");
-  if (positionColumn === undefined || depthColumn === undefined) return 0;
+  if (positionColumn === undefined || depthColumn === undefined) {
+    return { points: 0, skipped: 0 };
+  }
 
-  let added = 0;
+  let points = 0;
+  let skipped = 0;
   for (const row of res.data) {
     const position = row[positionColumn] as [number, number] | null | undefined;
     const [longitude, latitude] = position ?? [];
-    const depth = row[depthColumn];
+    const rawDepth = row[depthColumn];
     if (
-      typeof depth === "number" &&
-      Number.isFinite(depth) &&
+      typeof rawDepth === "number" &&
+      Number.isFinite(rawDepth) &&
       typeof longitude === "number" &&
       Number.isFinite(longitude) &&
       typeof latitude === "number" &&
       Number.isFinite(latitude)
     ) {
+      let depth = rawDepth;
       const heading =
         headingColumn === undefined
           ? undefined
@@ -210,13 +234,34 @@ function fold(
             offset,
           )
         : { lon: longitude, lat: latitude };
-      accumulator.add({
-        lon,
-        lat,
-        depth,
-      });
-      added++;
+      if (tide) {
+        // The tide is looked up for this row's own instant and position: an
+        // imported sounding can be from another vessel, months away. A row with
+        // no tide is dropped rather than stored raw in a datum grid.
+        const time = instantOf(row[0]);
+        if (!time) {
+          skipped++;
+          continue;
+        }
+        const corrected = await tide.correct(lon, lat, time, depth);
+        if (corrected === undefined) {
+          skipped++;
+          continue;
+        }
+        depth = corrected;
+      }
+      accumulator.add({ lon, lat, depth });
+      points++;
     }
   }
-  return added;
+  return { points, skipped };
+}
+
+/** A history row's timestamp, or undefined when it can't be parsed. */
+function instantOf(value: unknown): Temporal.Instant | undefined {
+  try {
+    return Temporal.Instant.from(String(value));
+  } catch {
+    return undefined;
+  }
 }

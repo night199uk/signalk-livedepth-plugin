@@ -19,6 +19,9 @@ already covered is there to look at the next time you're in the area.
   server has built up over time — extended live as you move.
 - **Rebuild from history.** Already have a track recorded on the server? A
   one-time rebuild fills the map in from it.
+- **Comparable across days.** Optionally reduce every sounding to a fixed
+  vertical datum (LAT or MLLW) using the tide predicted at the moment and place
+  it was taken, so a depth recorded months ago still means the same thing.
 
 ## What you need
 
@@ -37,7 +40,6 @@ chart's. Open **Layer settings** on its row (or the LiveDepth toolbar button) to
 choose what it shows:
 
 - **Show the layer** — on or off.
-- **Depth source** — your own recent track, or the accumulated depth map.
 - **Shade limit** — the depth the shading runs to; deeper water is left to the
   chart.
 - **Isobath interval** — how far apart the depth-contour lines are.
@@ -51,7 +53,16 @@ Depth values are shown in your preferred units.
 ## Server settings
 
 - **Path** — which depth measurement to record (below surface, transducer or
-  keel).
+  keel). Ignored when tide correction is on, which always uses the raw depth
+  below the surface.
+- **Tide correction** — store soundings relative to a fixed vertical datum
+  instead of the moving surface. Choose chart datum, **LAT** or **MLLW**. LAT
+  and MLLW are fixed references at each location, so a corrected depth keeps its
+  meaning when you return; chart datum changes with the chart region. Each
+  sounding — live, rebuilt from history, or recorded by another vessel — is
+  reduced using the tide predicted at its own time and position. Changing the
+  datum clears the map, because the stored cells are depths in the old datum;
+  run **Rebuild from history** to repopulate it.
 - **Depth transducer** — where the sounder sits on the hull, so each reading is
   placed at it rather than at the position the server reports.
 - **Transducer position correction** — shift readings from the vessel's
@@ -62,9 +73,15 @@ Depth values are shown in your preferred units.
 ## How it works
 
 The plugin runs on your Signal K server and turns each sounding into a
-Web-Mercator depth map, keeping the shallowest reading for every spot. A
-chartplotter that supports plotter extensions draws it as a map layer, rendering
-in the browser. The plugin offers the layer to the chartplotter automatically —
+Web-Mercator depth map, keeping the shallowest reading for every spot. With tide
+correction on it predicts the water level from the station database bundled with
+the plugin (Slackwater) — offline, for any past or future instant — and
+subtracts it before the reading reaches the map; a reading whose tide cannot be
+predicted is skipped rather than stored in the wrong datum. Because the browser
+cannot correct its own live readings, the layer then draws the corrected server
+tiles (refreshed as new soundings arrive) instead of adding the raw live depth on
+top. A chartplotter that supports plotter extensions draws it as a map layer,
+rendering in the browser. The plugin offers the layer to the chartplotter automatically —
 there's nothing to configure on the chart side.
 
 ## Development
