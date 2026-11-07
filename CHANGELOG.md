@@ -4,6 +4,16 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.20] - 2026-11-07
+
+### Fixed
+
+- **An interrupted history rebuild now resumes.** A server or plugin restart
+  aborts the rebuild, but the one-time trigger was cleared anyway, so the next
+  start did not resume and the rebuild looked finished. An interrupted run now
+  leaves the trigger set and continues from the last completed chunk; it is
+  cleared only when the rebuild completes (or fails).
+
 ## [0.3.19] - 2026-11-07
 
 ### Added
