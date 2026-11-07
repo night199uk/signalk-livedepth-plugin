@@ -4,6 +4,36 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.19] - 2026-11-07
+
+### Added
+
+- **Tide-corrected soundings.** With tide correction on, every depth is reduced
+  to a fixed chart datum (LAT or MLLW) using the predicted water level at that
+  sample's time and position, so soundings from different days and different
+  vessels share one grid. The Slackwater station database ships with the
+  plugin, so nothing is downloaded. The chart is told the datum in the plugin
+  metadata and stops folding its own live depth onto the corrected grid.
+
+### Changed
+
+- **Depth is always read from a Signal K depth path.** The external
+  tide-compensated paths (`belowSurfaceTideCompensated`, `…LAT`, `…MLLW`) are
+  removed; tide compensation now happens inside the plugin. Point the Depth
+  setting at `environment.depth.belowSurface` and turn tide correction on.
+- **The Depth selector is disabled while tide correction is on**, with a note
+  that changing the datum clears the grid because the stored cells are depths
+  in the old datum.
+
+### Fixed
+
+- **A history rebuild no longer races the history provider.** The plugin waits
+  up to 30 s for the History API provider to register before falling back to
+  the HTTP endpoint, so a rebuild at server start no longer fails instantly.
+- **Older pinned Slackwater versions are supported.** The tide predictor is
+  awaited, which works whether `nearestStation` returns a promise or the
+  predictor directly.
+
 ## [0.3.18] - 2026-11-02
 
 ### Changed
