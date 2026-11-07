@@ -167,10 +167,10 @@ test("a re-run resumes from the cursor instead of repeating", async () => {
   store.close();
 });
 
-test("defaults to one-hour history requests", async () => {
+test("defaults to six-hour history requests", async () => {
   const store = createTileStore(createTileDB(":memory:"));
   const from = Temporal.Instant.from("2024-01-01T00:00:00Z");
-  const to = from.add({ hours: 2 });
+  const to = from.add({ hours: 12 });
   const history = historyReturning([]);
 
   const progress = await seedFromHistory({
