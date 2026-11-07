@@ -19,10 +19,9 @@ import {
 
 /** Highest granularity we ask the History API for, in seconds. */
 export const DEFAULT_SEED_RESOLUTION = 0.1;
-/** Hours of history fetched per request. Small enough that the main-thread
- * History provider's parse and the response message clone stay short, while
- * still amortising the query cost. */
-export const DEFAULT_SEED_CHUNK_HOURS = 1;
+/** Hours of history fetched per request. Fewer, larger requests keep the
+ * provider's per-request overhead down; the fold itself runs in the worker. */
+export const DEFAULT_SEED_CHUNK_HOURS = 6;
 /** Soundings folded between tile writes. Keeps each write transaction short
  * enough that the live writer sharing the database is not left waiting on a
  * whole chunk. */
