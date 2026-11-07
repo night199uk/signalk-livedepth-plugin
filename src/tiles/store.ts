@@ -19,7 +19,10 @@ import {
  * of keyed lookups — no scanning, no interpolation at query time.
  */
 export function createTileDB(filename: string): DatabaseSync {
-  const db = new DatabaseSync(filename);
+  // The live writer and the seed worker hold separate connections. WAL lets
+  // them write at the same time only one at a time, so a short busy timeout
+  // absorbs the brief overlap instead of failing a flush with SQLITE_BUSY.
+  const db = new DatabaseSync(filename, { timeout: 5000 });
   db.exec("PRAGMA journal_mode = WAL");
   // Match the sounding log: skip per-commit fsync so tile writes don't wear out
   // an SD card. WAL + NORMAL is durable against corruption.
