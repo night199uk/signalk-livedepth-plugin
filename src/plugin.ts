@@ -24,6 +24,11 @@ import {
 import { registerPlotterExtension } from "./plotterext/provider.js";
 import { createCollector } from "./collector.js";
 
+/** How a history rebuild ended. Only a completed or failed run consumes the
+ * one-time `seed.run` trigger; an interrupted run leaves it set so the next
+ * start resumes from the stored cursor. */
+export type SeedOutcome = "completed" | "failed" | "aborted" | "skipped";
+
 /** The vessel's length overall, for locating the reference point the server
  * reports (the CCRP is midships).
  *
@@ -119,14 +124,17 @@ export default function createPlugin(app: ServerAPI): Plugin {
   /** The datum the store is in; also reported to chart clients. */
   let tideState: TideMode = "off";
   let seedStatus: SeedStatus = { running: false };
+  /** Bumped on every start/stop so a seed still winding down cannot overwrite
+   * the status of the run that replaced it. */
+  let seedGeneration = 0;
   let running = false;
   let routesRegistered = false;
 
-  const runSeed = async (resolution?: number): Promise<void> => {
-    if (seedStatus.running) return;
+  const runSeed = async (resolution?: number): Promise<SeedOutcome> => {
+    if (seedStatus.running) return "skipped";
     const store = tileStore;
     const cfg = config;
-    if (!store || !cfg) return;
+    if (!store || !cfg) return "skipped";
     // The store's datum is fixed once it holds cells: fold history with the
     // same correction it was built with, and refuse rather than write raw rows
     // into a datum grid.
@@ -135,8 +143,14 @@ export default function createPlugin(app: ServerAPI): Plugin {
       app.setPluginError(
         "Cannot rebuild from history: the tide model is unavailable, so raw depths would be stored in the wrong datum.",
       );
-      return;
+      return "failed";
     }
+
+    // If the plugin is stopped and started while this run is still finishing,
+    // the run is superseded: its store is closed and the new run owns the
+    // status.
+    const generation = seedGeneration;
+    const current = () => generation === seedGeneration;
 
     seedStatus = { running: true };
     app.setPluginStatus("Rebuilding bathymetry tiles from history…");
@@ -150,23 +164,39 @@ export default function createPlugin(app: ServerAPI): Plugin {
         tide,
         signal: abortController?.signal,
         onProgress: (p) => {
+          if (!current()) return;
           seedStatus = { running: !p.done, progress: p };
           app.setPluginStatus(
             `Rebuilding bathymetry tiles: ${p.points} points over ${p.chunks} windows${skipNote(p.skipped)}`,
           );
         },
       });
+      if (!current()) return "aborted";
       seedStatus = { running: false, progress };
+      if (!progress.done) {
+        app.setPluginStatus(
+          `Bathymetry rebuild interrupted after ${progress.chunks} windows; it will resume on the next start.`,
+        );
+        return "aborted";
+      }
       app.setPluginStatus(
         `Bathymetry rebuild complete: ${progress.points} points${skipNote(progress.skipped)}`,
       );
+      return "completed";
     } catch (err) {
+      if (!current()) return "aborted";
       seedStatus = { running: false, error: String(err) };
       app.setPluginError(`Bathymetry rebuild failed: ${err}`);
+      return "failed";
     }
   };
 
-  const seed: SeedHandle = { run: runSeed, status: () => seedStatus };
+  const seed: SeedHandle = {
+    run: async () => {
+      await runSeed();
+    },
+    status: () => seedStatus,
+  };
 
   return {
     id: "signalk-livedepth-plugin",
@@ -177,6 +207,11 @@ export default function createPlugin(app: ServerAPI): Plugin {
     async start(startConfig: Config, restart: (config: object) => void) {
       config = startConfig;
       app.debug("Starting signalk-livedepth-plugin");
+
+      // A new start supersedes any seed still winding down from the previous
+      // one (its signal is aborted and its store is closed).
+      seedGeneration++;
+      seedStatus = { running: false };
 
       abortController = new AbortController();
       tileStore = createTileStore(
@@ -272,20 +307,24 @@ export default function createPlugin(app: ServerAPI): Plugin {
       }
 
       if (collecting && startConfig.seed?.run) {
-        // One-time rebuild. Clear the trigger when it finishes (or fails) so it
-        // doesn't fire again on the next start; an interrupted run resumes from
-        // the stored cursor instead of repeating.
-        void runSeed(startConfig.seed.resolution).then(() =>
-          restart({
-            ...startConfig,
-            seed: { ...startConfig.seed, run: false },
-          }),
-        );
+        // One-time rebuild. A completed or failed run consumes the trigger; an
+        // interrupted run leaves it set so the next start resumes from the
+        // stored cursor instead of repeating.
+        void runSeed(startConfig.seed.resolution).then((outcome) => {
+          if (outcome === "completed" || outcome === "failed") {
+            restart({
+              ...startConfig,
+              seed: { ...startConfig.seed, run: false },
+            });
+          }
+        });
       }
     },
 
     stop() {
       running = false;
+      seedGeneration++;
+      seedStatus = { running: false };
       abortController?.abort("Stopping signalk-livedepth-plugin");
       tileStore?.close();
       tileStore = undefined;

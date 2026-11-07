@@ -170,13 +170,15 @@ export async function seedFromHistory({
   }
 
   // Build the pyramid once from the base tiles just written, rather than
-  // re-walking it for every changed tile on every chunk.
+  // re-walking it for every changed tile on every chunk. An interrupted run
+  // reports `done: false` so the caller keeps the trigger set and resumes from
+  // the cursor on the next start.
   if (!signal?.aborted) {
     rebuildAncestors(store);
+    progress.done = true;
+    onProgress?.(progress);
   }
 
-  progress.done = true;
-  onProgress?.(progress);
   return progress;
 }
 
