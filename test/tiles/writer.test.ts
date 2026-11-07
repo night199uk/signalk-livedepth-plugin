@@ -26,3 +26,28 @@ test("ending the writer flushes pending soundings", async () => {
   expect(store.read(20, 524288, 524288)?.size).toBe(1);
   store.close();
 });
+
+test("a locked flush is retried on the next tick", () => {
+  vi.useFakeTimers();
+  const store = createTileStore(createTileDB(":memory:"));
+  vi.spyOn(store, "transaction").mockImplementationOnce(() => {
+    throw new Error("database is locked");
+  });
+  const onError = vi.fn();
+  const writer = createTileWriter(store, {
+    flushIntervalMs: 100,
+    onError,
+  });
+  writer.write({ longitude: 0, latitude: 0, depth: 5 } as never, () => {});
+
+  vi.advanceTimersByTime(100);
+  expect(onError).toHaveBeenCalledTimes(1);
+  expect(store.read(20, 524288, 524288)).toBeUndefined();
+
+  vi.advanceTimersByTime(100);
+  expect(store.read(20, 524288, 524288)?.size).toBe(1);
+
+  writer.destroy();
+  store.close();
+  vi.useRealTimers();
+});

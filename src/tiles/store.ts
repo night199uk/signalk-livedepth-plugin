@@ -18,11 +18,16 @@ import {
  * base level, so a bounding-box read at the zoom-appropriate level is a handful
  * of keyed lookups — no scanning, no interpolation at query time.
  */
-export function createTileDB(filename: string): DatabaseSync {
+export function createTileDB(
+  filename: string,
+  { timeout = 5000 }: { timeout?: number } = {},
+): DatabaseSync {
   // The live writer and the seed worker hold separate connections. WAL lets
-  // them write at the same time only one at a time, so a short busy timeout
-  // absorbs the brief overlap instead of failing a flush with SQLITE_BUSY.
-  const db = new DatabaseSync(filename, { timeout: 5000 });
+  // them write at the same time only one at a time, so a busy timeout absorbs
+  // the brief overlap instead of failing a flush with SQLITE_BUSY. The live
+  // connection uses a short timeout: waiting here blocks Signal K's event loop,
+  // so it is better to fail fast and retry on the next flush.
+  const db = new DatabaseSync(filename, { timeout });
   db.exec("PRAGMA journal_mode = WAL");
   // Match the sounding log: skip per-commit fsync so tile writes don't wear out
   // an SD card. WAL + NORMAL is durable against corruption.

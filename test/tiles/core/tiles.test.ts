@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   BASE_ZOOM,
   MIN_ZOOM,
@@ -105,6 +105,23 @@ describe("bathymetry-tiles accumulator", () => {
     accumulator.add({ lon: POS[0], lat: POS[1], depth: -1 });
     accumulator.add({ lon: NaN, lat: POS[1], depth: 5 });
     expect(accumulator.pending).toBe(0);
+  });
+
+  it("keeps the batch when the write transaction fails", () => {
+    const store = createMemoryTileStore();
+    const accumulator = createTileAccumulator(store);
+    accumulator.add({ lon: POS[0], lat: POS[1], depth: 5 });
+    vi.spyOn(store, "transaction").mockImplementationOnce(() => {
+      throw new Error("database is locked");
+    });
+
+    expect(() => accumulator.flush()).toThrow("database is locked");
+    expect(accumulator.pending).toBe(1);
+
+    accumulator.flush();
+    expect(accumulator.pending).toBe(0);
+    const { x, y } = lngLatToCell(POS[0], POS[1], BASE_ZOOM);
+    expect(store.read(BASE_ZOOM, x, y)?.size).toBe(1);
   });
 
   it("rebuildAncestors builds the pyramid from the base tiles in one pass", () => {
