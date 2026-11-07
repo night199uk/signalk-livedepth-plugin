@@ -229,9 +229,9 @@ test("reads below surface and corrects each row at its own time", async () => {
   const progress = await seedFromHistory({
     app,
     store,
-    // The configured path is already compensated by another plugin; with tide
-    // correction on the seed must still read the raw below-surface value.
-    config: { ...config, path: "belowSurfaceTideCompensatedLAT" },
+    // With tide correction on the seed must read the raw below-surface value,
+    // not the configured path.
+    config: { ...config, path: "belowKeel" },
     from,
     to,
     chunkHours: 1,
@@ -242,9 +242,7 @@ test("reads below surface and corrects each row at its own time", async () => {
   const requested = history.getValues.mock.calls[0][0] as ValuesRequest;
   const paths = requested.pathSpecs.map((spec) => spec.path);
   expect(paths).toContain("environment.depth.belowSurface");
-  expect(paths).not.toContain(
-    "environment.depth.belowSurfaceTideCompensatedLAT",
-  );
+  expect(paths).not.toContain("environment.depth.belowKeel");
 
   // Each row used its own instant, and both were reduced by their own level.
   expect(seen).toEqual(["2024-01-01T00:10:00Z", "2024-01-01T00:20:00Z"]);
