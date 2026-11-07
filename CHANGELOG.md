@@ -4,6 +4,15 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.23] - 2026-11-07
+
+### Fixed
+
+- **A rebuild no longer crashes the live tile writer.** While the history
+  import rebuilds the map pyramid it briefly holds the tile database; the live
+  writer now retries a busy write on its next tick instead of waiting on the
+  main thread and throwing, and the pyramid is written in smaller batches.
+
 ## [0.3.22] - 2026-11-07
 
 ### Changed
