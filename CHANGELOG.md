@@ -4,6 +4,17 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.21] - 2026-11-07
+
+### Changed
+
+- **History rebuilds no longer stall the server.** The one-time import now runs
+  in a worker thread with its own SQLite connection, so folding historical rows,
+  writing tiles and rebuilding the map pyramid no longer block Signal K's event
+  loop. The History API provider stays in the main process; the worker requests
+  each window over a message port, and the live writer and import share the
+  database through WAL with a short busy timeout.
+
 ## [0.3.20] - 2026-11-07
 
 ### Fixed
