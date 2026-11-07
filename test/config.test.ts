@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { ServerAPI } from "@signalk/server-api";
-import { schema } from "../src/config.js";
+import { schema, formUiSchema } from "../src/config.js";
 
 function appReturning(value: unknown): ServerAPI {
   return { getSelfPath: () => value } as unknown as ServerAPI;
@@ -58,4 +58,12 @@ test("the tide settings offer a switch and the fixed datums", () => {
   expect(tide.datum.enum).toEqual(["chart", "LAT", "MLLW"]);
   expect(tide.datum.enumNames).toHaveLength(tide.datum.enum.length);
   expect(tide.datum.default).toBe("LAT");
+});
+
+test("the Depth field is disabled while tide correction is on", () => {
+  expect(formUiSchema({ tide: { enabled: true } })).toEqual({
+    path: { "ui:disabled": true },
+  });
+  expect(formUiSchema({ tide: { enabled: false } })).toEqual({});
+  expect(formUiSchema(undefined)).toEqual({});
 });
