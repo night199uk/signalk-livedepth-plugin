@@ -4,6 +4,15 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.24] - 2026-11-07
+
+### Changed
+
+- **History rebuilds request smaller windows.** The import now asks the History
+  provider for one hour at a time instead of six, so each main-thread response
+  is smaller and the sub-second stalls during a rebuild are reduced. The cursor
+  also advances in finer steps, so a restart repeats at most an hour.
+
 ## [0.3.23] - 2026-11-07
 
 ### Fixed
