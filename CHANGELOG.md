@@ -4,6 +4,15 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.25] - 2026-11-07
+
+### Changed
+
+- **History rebuilds use six-hour windows again.** One-hour windows looked
+  promising, but live testing showed the History provider's per-request
+  overhead made main-thread stalls more frequent and longer. The previous
+  window size is restored; the lock-contention fixes from 0.3.23 remain.
+
 ## [0.3.24] - 2026-11-07
 
 ### Changed
