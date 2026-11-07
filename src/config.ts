@@ -55,9 +55,6 @@ export const DepthPaths = [
   "belowSurface",
   "belowTransducer",
   "belowKeel",
-  "belowSurfaceTideCompensated",
-  "belowSurfaceTideCompensatedLAT",
-  "belowSurfaceTideCompensatedMLLW",
 ] as const;
 
 export function schema(app: ServerAPI) {
@@ -84,9 +81,6 @@ export function schema(app: ServerAPI) {
           "Depth below surface",
           "Depth below transducer",
           "Depth below keel",
-          "Depth below surface (tide compensated)",
-          "Depth below surface (tide compensated, LAT)",
-          "Depth below surface (tide compensated, MLLW)",
         ],
         ...(defaultPath === undefined ? {} : { default: defaultPath }),
       },

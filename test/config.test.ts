@@ -28,7 +28,7 @@ test("defaults are attached when the server has the values", () => {
   expect(s.properties.sounder.properties.x.default).toBe(3.2);
 });
 
-test("the depth options include the custom tide-compensated paths", () => {
+test("the depth options are the standard Signal K depth datums", () => {
   const s = schema(appReturning(undefined)) as unknown as {
     properties: { path: { enum: string[]; enumNames: string[] } };
   };
@@ -36,9 +36,6 @@ test("the depth options include the custom tide-compensated paths", () => {
     "belowSurface",
     "belowTransducer",
     "belowKeel",
-    "belowSurfaceTideCompensated",
-    "belowSurfaceTideCompensatedLAT",
-    "belowSurfaceTideCompensatedMLLW",
   ]);
   expect(s.properties.path.enumNames).toHaveLength(
     s.properties.path.enum.length,
