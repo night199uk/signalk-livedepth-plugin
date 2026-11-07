@@ -129,6 +129,7 @@ test("seeding writes rows in batches instead of one chunk-sized transaction", as
     config,
     from,
     to,
+    chunkHours: 6,
     history: historyReturning(rows),
   });
 
@@ -149,12 +150,40 @@ test("a re-run resumes from the cursor instead of repeating", async () => {
     ["2024-01-01T01:00:00Z", [0.001, 0.001], 15],
   ]);
 
-  await seedFromHistory({ app, store, config, from, to, history });
+  await seedFromHistory({
+    app,
+    store,
+    config,
+    from,
+    to,
+    chunkHours: 6,
+    history,
+  });
   expect(store.getMeta(SEED_CURSOR_KEY)).toBe(to.toString());
 
   const again = await seedFromHistory({ app, store, config, to, history });
   expect(again.chunks).toBe(0);
   expect(history.getValues).toHaveBeenCalledTimes(1);
+  store.close();
+});
+
+test("defaults to one-hour history requests", async () => {
+  const store = createTileStore(createTileDB(":memory:"));
+  const from = Temporal.Instant.from("2024-01-01T00:00:00Z");
+  const to = from.add({ hours: 2 });
+  const history = historyReturning([]);
+
+  const progress = await seedFromHistory({
+    app,
+    store,
+    config,
+    from,
+    to,
+    history,
+  });
+
+  expect(progress.chunks).toBe(2);
+  expect(history.getValues).toHaveBeenCalledTimes(2);
   store.close();
 });
 
@@ -244,6 +273,7 @@ test("shifts soundings to the transducer when an offset is given", async () => {
     config,
     from,
     to,
+    chunkHours: 6,
     offset: { forward: 100, starboard: 0 },
     history,
   });
