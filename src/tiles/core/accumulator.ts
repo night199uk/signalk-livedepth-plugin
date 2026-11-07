@@ -92,6 +92,11 @@ export function createTileAccumulator(
  * bulk load that ran with `ancestors: false`, so the whole pyramid is built
  * once rather than re-walked per changed tile per batch.
  */
+/** Parents written per transaction. The seed worker shares the database with
+ * the live writer, so a whole pyramid level in one transaction would hold the
+ * write lock long enough to stall the live flush. */
+const REBUILD_BATCH = 256;
+
 export function rebuildAncestors(
   store: TileStore,
   {
@@ -106,20 +111,31 @@ export function rebuildAncestors(
       const py = y >> 1;
       parents.set(`${px},${py}`, { x: px, y: py });
     }
-    store.transaction(() => {
-      for (const { x, y } of parents.values()) {
-        store.write(
-          z - 1,
-          x,
-          y,
-          minPoolTile([
-            store.read(z, x * 2, y * 2),
-            store.read(z, x * 2 + 1, y * 2),
-            store.read(z, x * 2, y * 2 + 1),
-            store.read(z, x * 2 + 1, y * 2 + 1),
-          ]),
-        );
-      }
-    });
+    let batch: { x: number; y: number }[] = [];
+    const flush = () => {
+      if (batch.length === 0) return;
+      const writing = batch;
+      batch = [];
+      store.transaction(() => {
+        for (const { x, y } of writing) {
+          store.write(
+            z - 1,
+            x,
+            y,
+            minPoolTile([
+              store.read(z, x * 2, y * 2),
+              store.read(z, x * 2 + 1, y * 2),
+              store.read(z, x * 2, y * 2 + 1),
+              store.read(z, x * 2 + 1, y * 2 + 1),
+            ]),
+          );
+        }
+      });
+    };
+    for (const parent of parents.values()) {
+      batch.push(parent);
+      if (batch.length >= REBUILD_BATCH) flush();
+    }
+    flush();
   }
 }

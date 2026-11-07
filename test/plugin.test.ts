@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Worker } from "node:worker_threads";
 import { expect, test, vi } from "vitest";
 import type { ServerAPI } from "@signalk/server-api";
 import type {
@@ -16,6 +17,13 @@ import createPlugin, {
 import type { Config } from "../src/config.js";
 import { createTileDB, createTileStore } from "../src/tiles/store.js";
 import { SEED_CURSOR_KEY } from "../src/tiles/seed.js";
+import { runSeedWorker } from "../src/tiles/seed-worker.js";
+import type {
+  SeedWorkerData,
+  SeedWorkerIn,
+  SeedWorkerOut,
+  SeedWorkerPort,
+} from "../src/tiles/seed-worker.js";
 
 function appReturning(node: unknown): ServerAPI {
   return { getSelfPath: () => node } as unknown as ServerAPI;
@@ -114,6 +122,51 @@ function seedApp(dir: string, history: HistoryApi): ServerAPI {
   } as unknown as ServerAPI;
 }
 
+/** A worker-shaped object that runs the real seed worker on this thread with a
+ * loopback port, so the plugin's RPC wiring is exercised without a thread. */
+class FakeSeedWorker {
+  private mainMessage?: (message: SeedWorkerOut) => void;
+  private mainExit?: (code: number) => void;
+  private workerMessage?: (message: SeedWorkerIn) => void;
+  private terminated = false;
+  private readonly port: SeedWorkerPort;
+
+  constructor(private readonly data: SeedWorkerData) {
+    this.port = {
+      post: (message) => this.mainMessage?.(message),
+      onMessage: (handler) => {
+        this.workerMessage = handler;
+      },
+    };
+    queueMicrotask(() => {
+      if (this.terminated) {
+        this.mainExit?.(0);
+        return;
+      }
+      void runSeedWorker(this.data, this.port).then(() => this.mainExit?.(0));
+    });
+  }
+
+  on(event: string, handler: (value: never) => void) {
+    if (event === "message") {
+      this.mainMessage = handler as (message: SeedWorkerOut) => void;
+    } else if (event === "exit") {
+      this.mainExit = handler as (code: number) => void;
+    }
+    return this;
+  }
+
+  postMessage(message: SeedWorkerIn) {
+    this.workerMessage?.(message);
+  }
+
+  terminate() {
+    this.terminated = true;
+    this.workerMessage?.({ type: "abort" });
+    return Promise.resolve(0);
+  }
+}
+
 test("an interrupted seed keeps its trigger and resumes from the cursor", async () => {
   const dir = mkdtempSync(join(tmpdir(), "livedepth-seed-"));
   try {
@@ -158,8 +211,9 @@ test("an interrupted seed keeps its trigger and resumes from the cursor", async 
       seed: { run: true, resolution: 1 },
     };
 
-    // Rebuild the plugin against the real fake history.
-    const running = createPlugin(app);
+    const running = createPlugin(app, {
+      createSeedWorker: (data) => new FakeSeedWorker(data) as unknown as Worker,
+    });
     const restart = vi.fn();
 
     await running.start(config, restart);

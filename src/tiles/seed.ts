@@ -158,6 +158,9 @@ export async function seedFromHistory({
       // interrupted seed resumes where it stopped rather than from the start.
       store.setMeta(SEED_CURSOR_KEY, end.toString());
     } catch (err) {
+      // An abort is not a failed window: stop without advancing the cursor
+      // past it, so the chunk is retried on the next start.
+      if (signal?.aborted) break;
       // A provider can reject a window (e.g. a path with no data); skip it and
       // keep going so one gap doesn't abort the whole rebuild.
       progress.chunksFailed++;

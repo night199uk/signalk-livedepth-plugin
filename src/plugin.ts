@@ -1,10 +1,19 @@
 import { ServerAPI, Plugin, PluginRouter } from "@signalk/server-api";
+import type { ValuesRequest } from "@signalk/server-api/history";
+import { Worker } from "node:worker_threads";
 import { join } from "path";
+import { Temporal } from "@js-temporal/polyfill";
 import { TransducerOffset, TileStore } from "./tiles/core/index.js";
 import { schema, formUiSchema, Config } from "./config.js";
 import { createTileDB, createTileStore } from "./tiles/store.js";
 import { createTileWriter } from "./tiles/writer.js";
-import { SEED_CURSOR_KEY, seedFromHistory } from "./tiles/seed.js";
+import { SEED_CURSOR_KEY } from "./tiles/seed.js";
+import type {
+  SeedWorkerData,
+  SeedWorkerIn,
+  SeedWorkerOut,
+} from "./tiles/seed-worker.js";
+import { getHistoryAPI } from "./history.js";
 import {
   TIDE_MODE_KEY,
   TideCorrection,
@@ -113,7 +122,22 @@ function skipNote(skipped: number): string {
   return skipped > 0 ? ` (${skipped} skipped: no tide prediction)` : "";
 }
 
-export default function createPlugin(app: ServerAPI): Plugin {
+/** Overridable only so tests can run the seed without a real worker thread. */
+export interface PluginOptions {
+  createSeedWorker?: (data: SeedWorkerData) => Worker;
+}
+
+export default function createPlugin(
+  app: ServerAPI,
+  options: PluginOptions = {},
+): Plugin {
+  const createSeedWorker =
+    options.createSeedWorker ??
+    ((data: SeedWorkerData) =>
+      new Worker(new URL("./tiles/seed-worker.js", import.meta.url), {
+        workerData: data,
+      }));
+
   let abortController: AbortController | undefined = undefined;
   // The gridded store served to chart clients. Built in start(), read by the
   // routes registered in registerWithRouter().
@@ -127,14 +151,15 @@ export default function createPlugin(app: ServerAPI): Plugin {
   /** Bumped on every start/stop so a seed still winding down cannot overwrite
    * the status of the run that replaced it. */
   let seedGeneration = 0;
+  let seedWorker: Worker | undefined;
+  let seedSettle: ((outcome: SeedOutcome) => void) | undefined;
   let running = false;
   let routesRegistered = false;
 
   const runSeed = async (resolution?: number): Promise<SeedOutcome> => {
     if (seedStatus.running) return "skipped";
-    const store = tileStore;
     const cfg = config;
-    if (!store || !cfg) return "skipped";
+    if (!tileStore || !cfg) return "skipped";
     // The store's datum is fixed once it holds cells: fold history with the
     // same correction it was built with, and refuse rather than write raw rows
     // into a datum grid.
@@ -147,48 +172,131 @@ export default function createPlugin(app: ServerAPI): Plugin {
     }
 
     // If the plugin is stopped and started while this run is still finishing,
-    // the run is superseded: its store is closed and the new run owns the
+    // the run is superseded: its worker is terminated and the new run owns the
     // status.
     const generation = seedGeneration;
     const current = () => generation === seedGeneration;
 
     seedStatus = { running: true };
+    app.setPluginStatus("Waiting for the history provider…");
+    const api = await getHistoryAPI({ app });
+    if (!current()) return "aborted";
+    if (!api) {
+      seedStatus = { running: false, error: "no history provider" };
+      app.setPluginError(
+        "Cannot rebuild from history: no History API provider is available.",
+      );
+      return "failed";
+    }
     app.setPluginStatus("Rebuilding bathymetry tiles from history…");
-    try {
-      const progress = await seedFromHistory({
-        app,
-        store,
+
+    return new Promise<SeedOutcome>((resolve) => {
+      let settled = false;
+      const settle = (outcome: SeedOutcome) => {
+        if (settled) return;
+        settled = true;
+        if (seedSettle === settle) seedSettle = undefined;
+        resolve(outcome);
+      };
+      seedSettle = settle;
+
+      // The worker owns its own SQLite connection and does the expensive
+      // folding, writing and pyramid rebuild. History requests are forwarded
+      // here because the provider lives in this process.
+      const worker = createSeedWorker({
+        dbPath: join(app.getDataDirPath(), "bathymetry-tiles.sqlite"),
         config: cfg,
         resolution,
         offset: transducer,
-        tide,
-        signal: abortController?.signal,
-        onProgress: (p) => {
-          if (!current()) return;
-          seedStatus = { running: !p.done, progress: p };
-          app.setPluginStatus(
-            `Rebuilding bathymetry tiles: ${p.points} points over ${p.chunks} windows${skipNote(p.skipped)}`,
-          );
-        },
+        tide: tideState === "off" ? undefined : tideState,
       });
-      if (!current()) return "aborted";
-      seedStatus = { running: false, progress };
-      if (!progress.done) {
-        app.setPluginStatus(
-          `Bathymetry rebuild interrupted after ${progress.chunks} windows; it will resume on the next start.`,
+      seedWorker = worker;
+
+      worker.on("message", (message: SeedWorkerOut) => {
+        if (!current()) return;
+        if (message.type === "getValues") {
+          const req: ValuesRequest = {
+            ...message.req,
+            from: Temporal.Instant.from(message.req.from),
+            to: Temporal.Instant.from(message.req.to),
+          };
+          api.getValues(req).then(
+            (res) => {
+              if (!current()) return;
+              worker.postMessage({
+                type: "getValuesResult",
+                id: message.id,
+                res,
+              } satisfies SeedWorkerIn);
+            },
+            (err) => {
+              if (!current()) return;
+              worker.postMessage({
+                type: "getValuesError",
+                id: message.id,
+                message: String(err),
+              } satisfies SeedWorkerIn);
+            },
+          );
+          return;
+        }
+        switch (message.type) {
+          case "progress": {
+            seedStatus = {
+              running: !message.progress.done,
+              progress: message.progress,
+            };
+            app.setPluginStatus(
+              `Rebuilding bathymetry tiles: ${message.progress.points} points over ${message.progress.chunks} windows${skipNote(message.progress.skipped)}`,
+            );
+            break;
+          }
+          case "result": {
+            seedStatus = { running: false, progress: message.progress };
+            if (message.progress.done) {
+              app.setPluginStatus(
+                `Bathymetry rebuild complete: ${message.progress.points} points${skipNote(message.progress.skipped)}`,
+              );
+              settle("completed");
+            } else {
+              app.setPluginStatus(
+                `Bathymetry rebuild interrupted after ${message.progress.chunks} windows; it will resume on the next start.`,
+              );
+              settle("aborted");
+            }
+            break;
+          }
+          case "error": {
+            seedStatus = { running: false, error: message.message };
+            app.setPluginError(`Bathymetry rebuild failed: ${message.message}`);
+            settle("failed");
+            break;
+          }
+          case "debug": {
+            app.debug("[seed worker] %s", message.message);
+            break;
+          }
+        }
+      });
+
+      worker.on("error", (err) => {
+        if (!current()) return settle("aborted");
+        seedStatus = { running: false, error: String(err) };
+        app.setPluginError(`Bathymetry rebuild failed: ${err}`);
+        settle("failed");
+      });
+
+      worker.on("exit", (code) => {
+        seedWorker = undefined;
+        if (settled) return;
+        if (!current()) return settle("aborted");
+        seedStatus = { running: false, error: `seed worker exited (${code})` };
+        app.setPluginError(
+          `Bathymetry rebuild worker exited with code ${code}.`,
         );
-        return "aborted";
-      }
-      app.setPluginStatus(
-        `Bathymetry rebuild complete: ${progress.points} points${skipNote(progress.skipped)}`,
-      );
-      return "completed";
-    } catch (err) {
-      if (!current()) return "aborted";
-      seedStatus = { running: false, error: String(err) };
-      app.setPluginError(`Bathymetry rebuild failed: ${err}`);
-      return "failed";
-    }
+        settle(code === 0 ? "aborted" : "failed");
+      });
+    });
   };
 
   const seed: SeedHandle = {
@@ -209,7 +317,10 @@ export default function createPlugin(app: ServerAPI): Plugin {
       app.debug("Starting signalk-livedepth-plugin");
 
       // A new start supersedes any seed still winding down from the previous
-      // one (its signal is aborted and its store is closed).
+      // one (its worker is terminated and its store is closed).
+      const previous = seedWorker;
+      seedWorker = undefined;
+      void previous?.terminate();
       seedGeneration++;
       seedStatus = { running: false };
 
@@ -324,6 +435,12 @@ export default function createPlugin(app: ServerAPI): Plugin {
     stop() {
       running = false;
       seedGeneration++;
+      const settle = seedSettle;
+      seedSettle = undefined;
+      settle?.("aborted");
+      const worker = seedWorker;
+      seedWorker = undefined;
+      void worker?.terminate();
       seedStatus = { running: false };
       abortController?.abort("Stopping signalk-livedepth-plugin");
       tileStore?.close();
