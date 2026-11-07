@@ -1,7 +1,21 @@
-import { expect, test } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { expect, test, vi } from "vitest";
 import type { ServerAPI } from "@signalk/server-api";
-import { readLengthOverall, resolveTransducerOffset } from "../src/plugin.js";
+import type {
+  HistoryApi,
+  ValuesRequest,
+  ValuesResponse,
+} from "@signalk/server-api/history";
+import { Temporal } from "@js-temporal/polyfill";
+import createPlugin, {
+  readLengthOverall,
+  resolveTransducerOffset,
+} from "../src/plugin.js";
 import type { Config } from "../src/config.js";
+import { createTileDB, createTileStore } from "../src/tiles/store.js";
+import { SEED_CURSOR_KEY } from "../src/tiles/seed.js";
 
 function appReturning(node: unknown): ServerAPI {
   return { getSelfPath: () => node } as unknown as ServerAPI;
@@ -82,4 +96,99 @@ test("no offset when the correction is off or the length is unknown", () => {
   expect(
     resolveTransducerOffset(correctionApp(undefined), correctionConfig),
   ).toBeUndefined();
+});
+
+/** A server stub with only the API the plugin touches at start. */
+function seedApp(dir: string, history: HistoryApi): ServerAPI {
+  return {
+    getDataDirPath: () => dir,
+    debug: () => {},
+    setPluginStatus: () => {},
+    setPluginError: () => {},
+    getSelfPath: () => undefined,
+    getPath: () => undefined,
+    getHistoryApi: async () => history,
+    subscriptionmanager: { subscribe: () => {} },
+    error: () => {},
+    config: { settings: {} },
+  } as unknown as ServerAPI;
+}
+
+test("an interrupted seed keeps its trigger and resumes from the cursor", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "livedepth-seed-"));
+  try {
+    const cursor = Temporal.Now.instant().subtract({ hours: 24 });
+    const db = createTileStore(
+      createTileDB(join(dir, "bathymetry-tiles.sqlite")),
+    );
+    db.setMeta(SEED_CURSOR_KEY, cursor.toString());
+    db.close();
+
+    const requests: ValuesRequest[] = [];
+    let blockSecond = true;
+    let release: (() => void) | undefined;
+    let markSecond = () => {};
+    const secondRequest = new Promise<void>((resolve) => {
+      markSecond = resolve;
+    });
+
+    const history = {
+      getValues: vi.fn(async (req: ValuesRequest): Promise<ValuesResponse> => {
+        requests.push(req);
+        if (blockSecond && requests.length === 2) {
+          // Hold the second chunk open so the test can stop the plugin
+          // mid-run, exactly as a restart would.
+          const blocked = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          markSecond();
+          await blocked;
+        }
+        return { values: [], data: [] } as unknown as ValuesResponse;
+      }),
+      getContexts: vi.fn(async () => ({})),
+      getPaths: vi.fn(async () => ({})),
+    } as unknown as HistoryApi;
+
+    const app = seedApp(dir, history);
+    const config: Config = {
+      path: "belowSurface",
+      sounder: { x: 0, y: 0 },
+      transducerCorrection: "off",
+      seed: { run: true, resolution: 1 },
+    };
+
+    // Rebuild the plugin against the real fake history.
+    const running = createPlugin(app);
+    const restart = vi.fn();
+
+    await running.start(config, restart);
+    await secondRequest;
+
+    // Stopping closes the store, so the in-flight chunk cannot advance the
+    // cursor; the last completed chunk is where the next run must resume.
+    running.stop();
+    release?.();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(restart).not.toHaveBeenCalled();
+    const resumedAt = requests[1]!.from;
+
+    // Start again with the trigger still set: it resumes at the cursor and
+    // clears the trigger only after finishing.
+    blockSecond = false;
+    requests.length = 0;
+    await running.start(config, restart);
+    await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
+
+    expect(requests[0]!.from.toString()).toBe(resumedAt.toString());
+    expect(restart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        seed: expect.objectContaining({ run: false }),
+      }),
+    );
+    running.stop();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

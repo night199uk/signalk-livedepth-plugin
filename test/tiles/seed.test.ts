@@ -121,6 +121,34 @@ test("a re-run resumes from the cursor instead of repeating", async () => {
   store.close();
 });
 
+test("an interrupted seed is not done and keeps the last completed cursor", async () => {
+  const store = createTileStore(createTileDB(":memory:"));
+  const from = Temporal.Instant.from("2024-01-01T00:00:00Z");
+  const to = from.add({ hours: 3 });
+  const controller = new AbortController();
+
+  const progress = await seedFromHistory({
+    app,
+    store,
+    config,
+    from,
+    to,
+    chunkHours: 1,
+    history: historyReturning([]),
+    signal: controller.signal,
+    onProgress: (p) => {
+      if (p.chunks === 1) controller.abort();
+    },
+  });
+
+  expect(progress.chunks).toBe(1);
+  expect(progress.done).toBe(false);
+  // The cursor stays at the last chunk that was safely written, so a restart
+  // resumes there instead of repeating the whole range.
+  expect(store.getMeta(SEED_CURSOR_KEY)).toBe("2024-01-01T01:00:00Z");
+  store.close();
+});
+
 test("a failing chunk is skipped and the seed continues", async () => {
   const store = createTileStore(createTileDB(":memory:"));
   const from = Temporal.Instant.from("2024-01-01T00:00:00Z");
