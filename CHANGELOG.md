@@ -4,6 +4,14 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.22] - 2026-11-07
+
+### Changed
+
+- **History rebuilds keep the live writer responsive.** The import now writes
+  folded tiles every 10,000 soundings instead of once per six-hour chunk, so the
+  live stream is not left waiting on a chunk-sized database transaction.
+
 ## [0.3.21] - 2026-11-07
 
 ### Changed
