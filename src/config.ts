@@ -57,6 +57,17 @@ export const DepthPaths = [
   "belowKeel",
 ] as const;
 
+/**
+ * The form overrides for the saved config. The Depth selector has no effect
+ * while tide correction is on (the raw below-surface depth is used), so the
+ * admin UI should show it disabled rather than as a live control.
+ */
+export function formUiSchema(
+  config?: Pick<Config, "tide">,
+): Record<string, object> {
+  return config?.tide?.enabled ? { path: { "ui:disabled": true } } : {};
+}
+
 export function schema(app: ServerAPI) {
   const defaultPath = DepthPaths.find((path) =>
     app.getSelfPath(`environment.depth.${path}.value`),
@@ -75,7 +86,7 @@ export function schema(app: ServerAPI) {
         type: "string",
         title: "Depth",
         description:
-          "Which depth measurement to record. Signal K publishes each relative to its own reference, so no draft or transducer offset is needed here. When tide correction is on, the raw depth below the surface is used instead and reduced to the chosen datum.",
+          "Which depth measurement to record. Signal K publishes each relative to its own reference, so no draft or transducer offset is needed here. Disabled while tide correction is on: the raw depth below the surface is used then and reduced to the chosen datum.",
         enum: DepthPaths,
         enumNames: [
           "Depth below surface",
@@ -88,7 +99,7 @@ export function schema(app: ServerAPI) {
         type: "object",
         title: "Tide correction",
         description:
-          "Store soundings relative to a fixed vertical datum by subtracting the predicted tide at each sounding's own time and position. A depth below the surface rises and falls with the tide; a depth below a datum does not, so it still means the same thing when you return months later. When this is on, the raw depth below the surface is recorded and the Depth setting is ignored. Changing the datum clears the depth map, because the stored cells are depths in the old datum.",
+          "Store soundings relative to a fixed vertical datum by subtracting the predicted tide at each sounding's own time and position. A depth below the surface rises and falls with the tide; a depth below a datum does not, so it still means the same thing when you return months later. When this is on, depth is always calculated using 'Depth below surface'. Changing the datum clears the depth map, because the stored cells are depths in the old datum.",
         properties: {
           enabled: {
             type: "boolean",

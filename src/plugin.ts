@@ -1,7 +1,7 @@
 import { ServerAPI, Plugin, PluginRouter } from "@signalk/server-api";
 import { join } from "path";
 import { TransducerOffset, TileStore } from "./tiles/core/index.js";
-import { schema, Config } from "./config.js";
+import { schema, formUiSchema, Config } from "./config.js";
 import { createTileDB, createTileStore } from "./tiles/store.js";
 import { createTileWriter } from "./tiles/writer.js";
 import { SEED_CURSOR_KEY, seedFromHistory } from "./tiles/seed.js";
@@ -293,6 +293,10 @@ export default function createPlugin(app: ServerAPI): Plugin {
 
     schema() {
       return schema(app);
+    },
+
+    uiSchema() {
+      return formUiSchema(config);
     },
 
     registerWithRouter(router: PluginRouter) {
