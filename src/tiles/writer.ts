@@ -16,11 +16,25 @@ export function createTileWriter(
   {
     baseZoom = BASE_ZOOM,
     flushIntervalMs = DEFAULT_FLUSH_MS,
-  }: { baseZoom?: number; flushIntervalMs?: number } = {},
+    onError,
+  }: {
+    baseZoom?: number;
+    flushIntervalMs?: number;
+    /** Called when a periodic flush has to be retried (e.g. SQLITE_BUSY). */
+    onError?: (err: unknown) => void;
+  } = {},
 ): Writable {
   const accumulator = createTileAccumulator(store, { baseZoom });
 
-  const timer = setInterval(() => accumulator.flush(), flushIntervalMs);
+  const timer = setInterval(() => {
+    try {
+      accumulator.flush();
+    } catch (err) {
+      // The accumulator keeps the batch, so the next tick retries it. Do not
+      // let a transient lock escape as an uncaught exception.
+      onError?.(err);
+    }
+  }, flushIntervalMs);
   timer.unref?.();
 
   return new Writable({

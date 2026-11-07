@@ -69,7 +69,6 @@ export function createTileAccumulator(
     flush() {
       if (dirty.size === 0) return;
       const tiles = [...dirty.values()];
-      dirty.clear();
       store.transaction(() => {
         for (const tile of tiles) {
           store.merge(tile.z, tile.x, tile.y, tile.cells);
@@ -78,6 +77,9 @@ export function createTileAccumulator(
           }
         }
       });
+      // Keep the batch when the transaction fails (e.g. SQLITE_BUSY), so the
+      // next flush retries it instead of dropping live soundings.
+      dirty.clear();
     },
 
     get pending() {
@@ -93,9 +95,9 @@ export function createTileAccumulator(
  * once rather than re-walked per changed tile per batch.
  */
 /** Parents written per transaction. The seed worker shares the database with
- * the live writer, so a whole pyramid level in one transaction would hold the
- * write lock long enough to stall the live flush. */
-const REBUILD_BATCH = 256;
+ * the live writer, so keep the write lock brief: a larger batch can outlast the
+ * live writer's busy timeout and stall its flush. */
+const REBUILD_BATCH = 32;
 
 export function rebuildAncestors(
   store: TileStore,

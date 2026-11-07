@@ -317,16 +317,19 @@ export default function createPlugin(
       app.debug("Starting signalk-livedepth-plugin");
 
       // A new start supersedes any seed still winding down from the previous
-      // one (its worker is terminated and its store is closed).
+      // one (its worker is terminated and its store is closed). Wait for it so
+      // the new connection cannot race it for the database lock.
       const previous = seedWorker;
       seedWorker = undefined;
-      void previous?.terminate();
+      await previous?.terminate();
       seedGeneration++;
       seedStatus = { running: false };
 
       abortController = new AbortController();
       tileStore = createTileStore(
-        createTileDB(join(app.getDataDirPath(), `bathymetry-tiles.sqlite`)),
+        createTileDB(join(app.getDataDirPath(), `bathymetry-tiles.sqlite`), {
+          timeout: 250,
+        }),
       );
       transducer = resolveTransducerOffset(app, config);
 
@@ -373,7 +376,10 @@ export default function createPlugin(
         createCollector({
           app,
           config,
-          writer: createTileWriter(tileStore),
+          writer: createTileWriter(tileStore, {
+            onError: (err) =>
+              app.debug("Live tile flush skipped, will retry: %s", String(err)),
+          }),
           offset: transducer,
           tide,
           signal: abortController.signal,
