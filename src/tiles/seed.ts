@@ -21,6 +21,10 @@ import {
 export const DEFAULT_SEED_RESOLUTION = 0.1;
 /** Hours of history fetched per request, to bound each response. */
 export const DEFAULT_SEED_CHUNK_HOURS = 6;
+/** Soundings folded between tile writes. Keeps each write transaction short
+ * enough that the live writer sharing the database is not left waiting on a
+ * whole chunk. */
+export const SEED_FLUSH_ROWS = 10_000;
 /** Store key holding the instant the last successful seed reached. */
 export const SEED_CURSOR_KEY = "seed.cursor";
 
@@ -215,6 +219,7 @@ async function fold(
 
   let points = 0;
   let skipped = 0;
+  let sinceFlush = 0;
   for (const row of res.data) {
     const position = row[positionColumn] as [number, number] | null | undefined;
     const [longitude, latitude] = position ?? [];
@@ -257,6 +262,10 @@ async function fold(
       }
       accumulator.add({ lon, lat, depth });
       points++;
+      if (++sinceFlush >= SEED_FLUSH_ROWS) {
+        accumulator.flush();
+        sinceFlush = 0;
+      }
     }
   }
   return { points, skipped };

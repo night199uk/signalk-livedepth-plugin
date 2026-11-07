@@ -15,7 +15,11 @@ import {
   lngLatToCell,
 } from "../../src/tiles/core/index.js";
 import { createTileDB, createTileStore } from "../../src/tiles/store.js";
-import { SEED_CURSOR_KEY, seedFromHistory } from "../../src/tiles/seed.js";
+import {
+  SEED_CURSOR_KEY,
+  SEED_FLUSH_ROWS,
+  seedFromHistory,
+} from "../../src/tiles/seed.js";
 import type { TideCorrection } from "../../src/tide.js";
 
 const app = {
@@ -101,6 +105,39 @@ test("seeding folds history rows into the tiles and records a cursor", async () 
   // the single bottom-up pass built the pyramid down to the coarsest level
   expect(store.listTiles(MIN_ZOOM).length).toBeGreaterThan(0);
   expect(store.getMeta(SEED_CURSOR_KEY)).toBe(to.toString());
+  store.close();
+});
+
+test("seeding writes rows in batches instead of one chunk-sized transaction", async () => {
+  const store = createTileStore(createTileDB(":memory:"));
+  const merge = vi.spyOn(store, "merge");
+  const from = Temporal.Instant.from("2024-01-01T00:00:00Z");
+  const to = from.add({ hours: 6 });
+  const rows = Array.from(
+    { length: SEED_FLUSH_ROWS + 1 },
+    () =>
+      ["2024-01-01T01:00:00Z", [0.001, 0.001], 10] as [
+        string,
+        [number, number],
+        number,
+      ],
+  );
+
+  const progress = await seedFromHistory({
+    app,
+    store,
+    config,
+    from,
+    to,
+    history: historyReturning(rows),
+  });
+
+  // One write for the full batch and one for the remainder, rather than a
+  // single transaction holding the live writer off for the whole chunk.
+  expect(merge).toHaveBeenCalledTimes(2);
+  expect(progress.points).toBe(SEED_FLUSH_ROWS + 1);
+  const cells = store.read(BASE_ZOOM, tile.x, tile.y);
+  expect([...cells!.values()][0].depth).toBe(1000);
   store.close();
 });
 
