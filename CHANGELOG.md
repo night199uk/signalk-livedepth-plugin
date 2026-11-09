@@ -4,6 +4,16 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.26] - 2026-11-07
+
+### Fixed
+
+- **Zooming back in refreshes the LiveDepth layer.** After zooming out the
+  layer reused its cached, coarser tiles whenever the smaller view still fitted
+  inside them, so zooming back in showed a scaled-up blur instead of the base
+  detail. The cache now tracks the fetched zoom and refetches when the view
+  needs a finer level.
+
 ## [0.3.25] - 2026-11-07
 
 ### Changed
