@@ -78,6 +78,32 @@ export function latOf(y: number): number {
   return (2 * Math.atan(Math.exp(y / EARTH_RADIUS)) - Math.PI / 2) / RAD;
 }
 
+/** Whether `outer` (west, south, east, north) contains `inner`. */
+function boundsContain(
+  outer: readonly number[],
+  inner: readonly number[],
+): boolean {
+  return (
+    inner[0] >= outer[0] &&
+    inner[1] >= outer[1] &&
+    inner[2] <= outer[2] &&
+    inner[3] <= outer[3]
+  );
+}
+
+/** Whether a view needs a new tile fetch. `fetched` is the padded box and
+ * zoom of the last fetch. Being inside that box is not enough: after zooming
+ * out the cached tiles are coarse, and zooming back in needs finer ones even
+ * though the smaller view is still inside the old box. */
+export function tileFetchRequired(
+  fetched: { bounds: readonly number[]; zoom: number } | null,
+  bounds: readonly number[],
+  requiredZoom: number,
+): boolean {
+  if (!fetched) return true;
+  return !boundsContain(fetched.bounds, bounds) || requiredZoom > fetched.zoom;
+}
+
 /** Depth tint, after the Navionics SonarChart water palette: a saturated
  * azure at the surface, fading through pale blues to white at the shade
  * limit. Stops are `[t, r, g, b]` with `t` the fraction from the surface (0)

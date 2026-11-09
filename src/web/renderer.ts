@@ -14,7 +14,7 @@ import type {
   OverlayRequestEvent,
   OverlayStateEvent,
 } from "signalk-plotterext-bus/extension";
-import type { DepthSample } from "./shared/live-depth.js";
+import { tileFetchRequired, type DepthSample } from "./shared/live-depth.js";
 import {
   DEFAULT_SETTINGS,
   mergeSettings,
@@ -44,8 +44,9 @@ const DEBOUNCE_MS = 400;
 const TILE_PAD = 0.1;
 const MAX_LAT = 85;
 
-/** The padded tile box that produced the current base samples. */
+/** The padded tile box and zoom that produced the current base samples. */
 let fetchedBounds: [number, number, number, number] | null = null;
+let fetchedZoom: number | null = null;
 
 /** `bounds` with `pad` of its width and height added on each side. */
 function padBounds(
@@ -63,17 +64,6 @@ function padBounds(
   ];
 }
 
-function boundsContain(
-  outer: readonly number[],
-  inner: readonly number[],
-): boolean {
-  return (
-    inner[0] >= outer[0] &&
-    inner[1] >= outer[1] &&
-    inner[2] <= outer[2] &&
-    inner[3] <= outer[3]
-  );
-}
 /** Most tile fetches a single view may need before the layer draws nothing. */
 const MAX_TILE_FETCHES = 24;
 /** How long live soundings are batched before folding into the client store.
@@ -216,10 +206,6 @@ async function loadUnits(): Promise<void> {
 }
 
 async function fetchTiles(req: RenderRequest): Promise<void> {
-  // Still inside the tiles (and field) already fetched: nothing to do.
-  if (fetchedBounds && boundsContain(fetchedBounds, req.bounds)) {
-    return;
-  }
   const fetchBounds = padBounds(req.bounds, TILE_PAD);
   const cellMetres = Math.max(req.resolution, 0.01);
   let zoom = zoomForCellSize(cellMetres, MIN_ZOOM, BASE_ZOOM);
@@ -227,6 +213,20 @@ async function fetchTiles(req: RenderRequest): Promise<void> {
     const { xs, ys } = tileRangeForBbox(fetchBounds, zoom);
     if (xs.length * ys.length <= MAX_TILE_FETCHES) break;
     zoom--;
+  }
+  // Reuse the cached tiles only when the view fits inside them at the same or
+  // a finer level. A contained view after zooming back in still needs a finer
+  // fetch, or the layer just scales the coarse zoomed-out tiles.
+  if (
+    !tileFetchRequired(
+      fetchedBounds && fetchedZoom !== null
+        ? { bounds: fetchedBounds, zoom: fetchedZoom }
+        : null,
+      req.bounds,
+      zoom,
+    )
+  ) {
+    return;
   }
   const { xs, ys } = tileRangeForBbox(fetchBounds, zoom);
   const out: DepthSample[] = [];
@@ -248,6 +248,7 @@ async function fetchTiles(req: RenderRequest): Promise<void> {
   );
   baseSamples = out;
   fetchedBounds = fetchBounds;
+  fetchedZoom = zoom;
   publishBase();
 }
 
@@ -348,6 +349,7 @@ function refreshTiles(): void {
   liveTilesDirty = false;
   tilesRefreshAt = livePosition ? [...livePosition] : null;
   fetchedBounds = null;
+  fetchedZoom = null;
   void refresh();
 }
 
@@ -529,6 +531,7 @@ await client.subscribe(["overlay.state"], (_name, payload) => {
   if (!state.visible || state.suspended) {
     worker.postMessage({ type: "release" });
     fetchedBounds = null;
+    fetchedZoom = null;
     stopLive();
   } else {
     startLive();
