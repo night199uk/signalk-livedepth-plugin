@@ -11,6 +11,7 @@ import {
   orderDeepToShallow,
   selectShoals,
   shadeColor,
+  tileFetchRequired,
   type DepthCell,
   type DepthSample,
 } from "../../../src/web/shared/live-depth.js";
@@ -190,5 +191,29 @@ describe("live-depth ordering and shoals", () => {
       1000,
     );
     expect(clusters.map((c) => c.depth)).toEqual([40, 2]);
+  });
+});
+
+describe("live-depth tile fetch reuse", () => {
+  const view: [number, number, number, number] = [-80.1, 9.5, -79.9, 9.7];
+  const fetched = { bounds: [-80.2, 9.4, -79.8, 9.8] as const, zoom: 15 };
+
+  it("fetches when there are no tiles yet", () => {
+    expect(tileFetchRequired(null, view, 15)).toBe(true);
+  });
+
+  it("reuses tiles that cover the view at the same or a finer zoom", () => {
+    expect(tileFetchRequired(fetched, view, 15)).toBe(false);
+    expect(tileFetchRequired(fetched, view, 14)).toBe(false);
+  });
+
+  it("refetches a contained view when it needs a finer zoom", () => {
+    // Zooming out fetched z9 tiles; zooming back in is still inside that box.
+    expect(tileFetchRequired({ ...fetched, zoom: 9 }, view, 15)).toBe(true);
+  });
+
+  it("fetches when the view has moved outside the cached box", () => {
+    const moved: [number, number, number, number] = [-79.5, 9.5, -79.3, 9.7];
+    expect(tileFetchRequired(fetched, moved, 15)).toBe(true);
   });
 });
