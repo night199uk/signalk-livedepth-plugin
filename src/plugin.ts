@@ -1,5 +1,8 @@
 import { ServerAPI, Plugin, PluginRouter } from "@signalk/server-api";
-import type { ValuesRequest } from "@signalk/server-api/history";
+import type {
+  ContextsRequest,
+  ValuesRequest,
+} from "@signalk/server-api/history";
 import { Worker } from "node:worker_threads";
 import { join } from "path";
 import { Temporal } from "@js-temporal/polyfill";
@@ -7,7 +10,7 @@ import { TransducerOffset, TileStore } from "./tiles/core/index.js";
 import { schema, formUiSchema, Config } from "./config.js";
 import { createTileDB, createTileStore } from "./tiles/store.js";
 import { createTileWriter } from "./tiles/writer.js";
-import { SEED_CURSOR_KEY } from "./tiles/seed.js";
+import { SEED_CURSOR_KEY, SEED_CURSORS_KEY } from "./tiles/seed.js";
 import type {
   SeedWorkerData,
   SeedWorkerIn,
@@ -68,6 +71,12 @@ export function readVesselBeam(app: ServerAPI): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? value
     : undefined;
+}
+
+/** The server's own vessel context, matching `createLiveStream`'s. */
+function selfContextOf(app: ServerAPI): string {
+  const uuid = app.getSelfPath("uuid") as string | undefined;
+  return uuid ? `vessels.${uuid}` : "vessels.self";
 }
 
 /** The server's GNSS antenna correction mode; `off` unless configured. */
@@ -209,6 +218,7 @@ export default function createPlugin(
         resolution,
         offset: transducer,
         tide: tideState === "off" ? undefined : tideState,
+        selfContext: selfContextOf(app),
       });
       seedWorker = worker;
 
@@ -240,6 +250,31 @@ export default function createPlugin(
           );
           return;
         }
+        if (message.type === "getContexts") {
+          const req: ContextsRequest = {
+            from: Temporal.Instant.from(message.req.from),
+            to: Temporal.Instant.from(message.req.to),
+          };
+          api.getContexts(req).then(
+            (res) => {
+              if (!current()) return;
+              worker.postMessage({
+                type: "getContextsResult",
+                id: message.id,
+                res,
+              } satisfies SeedWorkerIn);
+            },
+            (err) => {
+              if (!current()) return;
+              worker.postMessage({
+                type: "getContextsError",
+                id: message.id,
+                message: String(err),
+              } satisfies SeedWorkerIn);
+            },
+          );
+          return;
+        }
         switch (message.type) {
           case "progress": {
             seedStatus = {
@@ -247,7 +282,7 @@ export default function createPlugin(
               progress: message.progress,
             };
             app.setPluginStatus(
-              `Rebuilding bathymetry tiles: ${message.progress.points} points over ${message.progress.chunks} windows${skipNote(message.progress.skipped)}`,
+              `Rebuilding bathymetry tiles: ${message.progress.points} points over ${message.progress.chunks} windows${message.progress.context ? ` (${message.progress.context})` : ""}${skipNote(message.progress.skipped)}`,
             );
             break;
           }
@@ -370,6 +405,7 @@ export default function createPlugin(
         if (reset) {
           tileStore.clear();
           tileStore.setMeta(SEED_CURSOR_KEY, "");
+          tileStore.setMeta(SEED_CURSORS_KEY, "");
         }
         tileStore.setMeta(TIDE_MODE_KEY, tideState);
 

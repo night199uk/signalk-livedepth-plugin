@@ -16,7 +16,7 @@ import createPlugin, {
 } from "../src/plugin.js";
 import type { Config } from "../src/config.js";
 import { createTileDB, createTileStore } from "../src/tiles/store.js";
-import { SEED_CURSOR_KEY } from "../src/tiles/seed.js";
+import { SEED_CURSORS_KEY } from "../src/tiles/seed.js";
 import { runSeedWorker } from "../src/tiles/seed-worker.js";
 import type {
   SeedWorkerData,
@@ -174,7 +174,10 @@ test("an interrupted seed keeps its trigger and resumes from the cursor", async 
     const db = createTileStore(
       createTileDB(join(dir, "bathymetry-tiles.sqlite")),
     );
-    db.setMeta(SEED_CURSOR_KEY, cursor.toString());
+    db.setMeta(
+      SEED_CURSORS_KEY,
+      JSON.stringify({ "vessels.self": cursor.toString() }),
+    );
     db.close();
 
     const requests: ValuesRequest[] = [];
@@ -187,6 +190,16 @@ test("an interrupted seed keeps its trigger and resumes from the cursor", async 
 
     const history = {
       getValues: vi.fn(async (req: ValuesRequest): Promise<ValuesResponse> => {
+        // The context discovery probe is a coarse depth-only query; answer it
+        // without treating it as a seed chunk.
+        if (req.resolution === 86400) {
+          return {
+            values: [{ path: "environment.depth.belowSurface" }],
+            data: [
+              [Temporal.Now.instant().subtract({ hours: 24 }).toString(), 10],
+            ],
+          } as unknown as ValuesResponse;
+        }
         requests.push(req);
         if (blockSecond && requests.length === 2) {
           // Hold the second chunk open so the test can stop the plugin
@@ -199,7 +212,7 @@ test("an interrupted seed keeps its trigger and resumes from the cursor", async 
         }
         return { values: [], data: [] } as unknown as ValuesResponse;
       }),
-      getContexts: vi.fn(async () => ({})),
+      getContexts: vi.fn(async () => ["vessels.self"]),
       getPaths: vi.fn(async () => ({})),
     } as unknown as HistoryApi;
 
