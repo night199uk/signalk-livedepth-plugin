@@ -6,7 +6,7 @@ import { Temporal } from "@js-temporal/polyfill";
 import type { ValuesResponse } from "@signalk/server-api/history";
 import type { Config } from "../../src/config.js";
 import { BASE_ZOOM } from "../../src/tiles/core/index.js";
-import { SEED_CURSOR_KEY } from "../../src/tiles/seed.js";
+import { SEED_CURSORS_KEY } from "../../src/tiles/seed.js";
 import {
   runSeedWorker,
   type SeedWorkerIn,
@@ -42,7 +42,10 @@ function temporaryStore(cursor: Temporal.Instant): {
   const dir = mkdtempSync(join(tmpdir(), "livedepth-seed-worker-"));
   const dbPath = join(dir, "bathymetry-tiles.sqlite");
   const store = createTileStore(createTileDB(dbPath));
-  store.setMeta(SEED_CURSOR_KEY, cursor.toString());
+  store.setMeta(
+    SEED_CURSORS_KEY,
+    JSON.stringify({ "vessels.self": cursor.toString() }),
+  );
   store.close();
   return { dir, dbPath };
 }
@@ -68,7 +71,10 @@ test("folds a chunk off the main thread and reports the result", async () => {
   };
 
   try {
-    await runSeedWorker({ dbPath, config, resolution: 1 }, port);
+    await runSeedWorker(
+      { dbPath, config, resolution: 1, contexts: ["vessels.self"] },
+      port,
+    );
 
     const result = messages.find((m) => m.type === "result");
     expect(result).toBeDefined();
@@ -77,7 +83,8 @@ test("folds a chunk off the main thread and reports the result", async () => {
     expect(result.progress.points).toBeGreaterThan(0);
 
     const store = createTileStore(createTileDB(dbPath));
-    expect(store.getMeta(SEED_CURSOR_KEY)).not.toBe(cursor.toString());
+    const cursors = JSON.parse(store.getMeta(SEED_CURSORS_KEY) ?? "{}");
+    expect(cursors["vessels.self"]).not.toBe(cursor.toString());
     expect(store.listTiles(BASE_ZOOM)).not.toHaveLength(0);
     store.close();
   } finally {
@@ -101,7 +108,10 @@ test("an abort stops without advancing the cursor", async () => {
   };
 
   try {
-    const run = runSeedWorker({ dbPath, config, resolution: 1 }, port);
+    const run = runSeedWorker(
+      { dbPath, config, resolution: 1, contexts: ["vessels.self"] },
+      port,
+    );
     await vi.waitFor(() =>
       expect(messages.some((m) => m.type === "getValues")).toBe(true),
     );
@@ -113,7 +123,68 @@ test("an abort stops without advancing the cursor", async () => {
     expect(result.progress.done).toBe(false);
 
     const store = createTileStore(createTileDB(dbPath));
-    expect(store.getMeta(SEED_CURSOR_KEY)).toBe(cursor.toString());
+    const cursors = JSON.parse(store.getMeta(SEED_CURSORS_KEY) ?? "{}");
+    expect(cursors["vessels.self"]).toBe(cursor.toString());
+    store.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("discovers and seeds every vessel context with depth", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "livedepth-seed-worker-"));
+  const dbPath = join(dir, "bathymetry-tiles.sqlite");
+  const depthPath = `environment.depth.${config.path}`;
+  const stamp = Temporal.Now.instant().subtract({ hours: 6 }).toString();
+  const messages: SeedWorkerOut[] = [];
+  let handler: ((message: SeedWorkerIn) => void) | undefined;
+  const port: SeedWorkerPort = {
+    post: (message) => {
+      messages.push(message);
+      if (message.type === "getContexts") {
+        queueMicrotask(() =>
+          handler?.({
+            type: "getContextsResult",
+            id: message.id,
+            res: ["vessels.self", "vessels.tender"] as never,
+          }),
+        );
+      } else if (message.type === "getValues") {
+        const probe = message.req.pathSpecs.length === 1;
+        const position =
+          message.req.context === "vessels.tender"
+            ? [0.002, 0.002]
+            : [0.001, 0.001];
+        const res = probe
+          ? {
+              values: [{ path: depthPath }],
+              data: [[stamp, 10]],
+            }
+          : {
+              values: [{ path: "navigation.position" }, { path: depthPath }],
+              data: [[stamp, position, 10]],
+            };
+        queueMicrotask(() =>
+          handler?.({
+            type: "getValuesResult",
+            id: message.id,
+            res: res as never,
+          }),
+        );
+      }
+    },
+    onMessage: (fn) => {
+      handler = fn;
+    },
+  };
+
+  try {
+    await runSeedWorker({ dbPath, config, resolution: 1 }, port);
+    const store = createTileStore(createTileDB(dbPath));
+    const cursors = JSON.parse(store.getMeta(SEED_CURSORS_KEY) ?? "{}");
+    expect(cursors["vessels.self"]).toBeDefined();
+    expect(cursors["vessels.tender"]).toBeDefined();
+    expect(store.listTiles(BASE_ZOOM).length).toBeGreaterThanOrEqual(2);
     store.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });

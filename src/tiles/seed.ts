@@ -1,4 +1,4 @@
-import { Path, ServerAPI } from "@signalk/server-api";
+import { Context, Path, ServerAPI } from "@signalk/server-api";
 import type {
   HistoryApi,
   ValuesRequest,
@@ -28,8 +28,12 @@ export const DEFAULT_SEED_CHUNK_HOURS = 6;
 export const SEED_FLUSH_ROWS = 10_000;
 /** Store key holding the instant the last successful seed reached. */
 export const SEED_CURSOR_KEY = "seed.cursor";
+/** Store key holding each vessel context's own seed cursor. */
+export const SEED_CURSORS_KEY = "seed.cursors";
 
 export interface SeedProgress {
+  /** The vessel context this progress is for, when not the legacy self seed. */
+  context?: string;
   from: string;
   to: string;
   chunks: number;
@@ -44,6 +48,8 @@ export interface SeedOptions {
   app: ServerAPI;
   store: TileStore;
   config: Config;
+  /** Vessel context to seed. Undefined keeps the legacy self-only behaviour. */
+  context?: Context;
   /** Earliest instant to seed from; defaults to {@link BATHY_EPOCH}. */
   from?: Temporal.Instant;
   /** Latest instant to seed to; defaults to now. */
@@ -58,6 +64,9 @@ export interface SeedOptions {
   offset?: TransducerOffset;
   /** Reduce each sounding to a fixed datum, using the row's own time. */
   tide?: TideCorrection;
+  /** Rebuild the pyramid at the end. The multi-context worker disables this
+   * per context and rebuilds once after all contexts. */
+  rebuild?: boolean;
   signal?: AbortSignal;
   onProgress?: (progress: SeedProgress) => void;
 }
@@ -73,6 +82,7 @@ export async function seedFromHistory({
   app,
   store,
   config,
+  context,
   from,
   to = Temporal.Now.instant(),
   resolution = DEFAULT_SEED_RESOLUTION,
@@ -80,6 +90,7 @@ export async function seedFromHistory({
   history,
   offset,
   tide,
+  rebuild = true,
   signal,
   onProgress,
 }: SeedOptions): Promise<SeedProgress> {
@@ -88,7 +99,7 @@ export async function seedFromHistory({
     throw new Error("No History API provider is available to seed from");
   }
 
-  const start = from ?? cursorFromStore(store) ?? BATHY_EPOCH;
+  const start = cursorFromStore(store, context) ?? from ?? BATHY_EPOCH;
 
   // With tide correction on, the raw below-surface depth is the base: the
   // configured path may already be compensated (and only for this vessel now),
@@ -126,6 +137,7 @@ export async function seedFromHistory({
 
   const accumulator = createTileAccumulator(store, { ancestors: false });
   const progress: SeedProgress = {
+    context,
     from: start.toString(),
     to: to.toString(),
     chunks: 0,
@@ -143,6 +155,7 @@ export async function seedFromHistory({
 
     try {
       const res = await api.getValues({
+        ...(context ? { context } : {}),
         from: at,
         to: end,
         resolution,
@@ -161,7 +174,7 @@ export async function seedFromHistory({
       accumulator.flush();
       // Advance the cursor only after the chunk is safely written, so an
       // interrupted seed resumes where it stopped rather than from the start.
-      store.setMeta(SEED_CURSOR_KEY, end.toString());
+      setCursor(store, context, end.toString());
     } catch (err) {
       // An abort is not a failed window: stop without advancing the cursor
       // past it, so the chunk is retried on the next start.
@@ -180,9 +193,10 @@ export async function seedFromHistory({
   // Build the pyramid once from the base tiles just written, rather than
   // re-walking it for every changed tile on every chunk. An interrupted run
   // reports `done: false` so the caller keeps the trigger set and resumes from
-  // the cursor on the next start.
+  // the cursor on the next start. The multi-context worker disables the rebuild
+  // per context and runs it once after every context is done.
   if (!signal?.aborted) {
-    rebuildAncestors(store);
+    if (rebuild) rebuildAncestors(store);
     progress.done = true;
     onProgress?.(progress);
   }
@@ -190,8 +204,21 @@ export async function seedFromHistory({
   return progress;
 }
 
-/** The instant the last seed reached, or undefined when there is none. */
-function cursorFromStore(store: TileStore): Temporal.Instant | undefined {
+/** The instant a context's last completed chunk reached, or undefined. */
+function cursorFromStore(
+  store: TileStore,
+  context?: Context,
+): Temporal.Instant | undefined {
+  if (context) {
+    const cursors = readCursors(store);
+    const value = cursors[context];
+    if (!value) return undefined;
+    try {
+      return Temporal.Instant.from(value);
+    } catch {
+      return undefined;
+    }
+  }
   const value = store.getMeta(SEED_CURSOR_KEY);
   if (!value) return undefined;
   try {
@@ -199,6 +226,40 @@ function cursorFromStore(store: TileStore): Temporal.Instant | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** Persist the last completed chunk for a context (or the legacy self cursor). */
+function setCursor(
+  store: TileStore,
+  context: Context | undefined,
+  value: string,
+) {
+  if (!context) {
+    store.setMeta(SEED_CURSOR_KEY, value);
+    return;
+  }
+  const cursors = readCursors(store);
+  cursors[context] = value;
+  store.setMeta(SEED_CURSORS_KEY, JSON.stringify(cursors));
+}
+
+function readCursors(store: TileStore): Record<string, string> {
+  const raw = store.getMeta(SEED_CURSORS_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return Object.fromEntries(
+        Object.entries(parsed as Record<string, unknown>).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        ),
+      );
+    }
+  } catch {
+    // A malformed cursor map is treated as empty; the affected contexts start
+    // from their own first timestamp again.
+  }
+  return {};
 }
 
 /** Fold a values response's rows into the accumulator. */
