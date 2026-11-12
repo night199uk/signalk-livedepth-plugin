@@ -4,6 +4,17 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.27] - 2026-11-07
+
+### Added
+
+- **History rebuilds every depth-reporting vessel.** The live collector already
+  records any vessel that publishes position and depth, but the history import
+  only queried the current vessel. It now discovers every vessel context with a
+  depth history, rebuilds each one with its own cursor, corrects tide per
+  sounding from that sounding's own time and position, and applies the current
+  vessel's transducer offset only to its own soundings.
+
 ## [0.3.26] - 2026-11-07
 
 ### Fixed
