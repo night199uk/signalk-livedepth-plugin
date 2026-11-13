@@ -48,6 +48,18 @@ function positionOf(
 }
 
 /**
+ * The server's own vessel context. Signal K identifies self by UUID when one
+ * is configured, otherwise by MMSI; a server with neither uses the `self`
+ * alias.
+ */
+export function selfContextOf(app: ServerAPI): string {
+  const uuid = app.getSelfPath("uuid") as string | undefined;
+  if (uuid) return `vessels.${uuid}`;
+  const mmsi = app.getSelfPath("mmsi") as string | number | undefined;
+  return mmsi ? `vessels.urn:mrn:imo:mmsi:${mmsi}` : "vessels.self";
+}
+
+/**
  * Subscribe to every vessel that publishes a depth on the configured datum,
  * pair each sounding with that vessel's own position fix, and emit
  * `BathymetryData`. Vessels are discovered from the data model: one that
@@ -77,8 +89,7 @@ export function createLiveStream(
   const depthKey = depthPath.slice("environment.depth.".length);
   const include = new Set(config.vessels?.include ?? []);
   const exclude = new Set(config.vessels?.exclude ?? []);
-  const selfUrn = app.getSelfPath("uuid") as string | undefined;
-  const selfContext = selfUrn ? `vessels.${selfUrn}` : "vessels.self";
+  const selfContext = selfContextOf(app);
 
   app.debug(`Collecting ${depthPath} from every vessel that publishes it`);
 

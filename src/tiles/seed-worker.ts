@@ -301,7 +301,15 @@ async function discoverContexts(
     app.debug("Seed: history context discovery failed: %s", String(err));
   }
   const candidates = [
-    ...new Set(listed.filter((context) => context.startsWith("vessels."))),
+    ...new Set(
+      listed.filter(
+        (context) =>
+          context.startsWith("vessels.") &&
+          // `vessels.self` is an alias for the real context (a UUID or MMSI).
+          // Seeding both would duplicate the same history under two cursors.
+          (context !== "vessels.self" || selfContext === "vessels.self"),
+      ),
+    ),
   ];
   if (!candidates.includes(selfContext as Context)) {
     candidates.push(selfContext as Context);
