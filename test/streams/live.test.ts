@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import type { Delta, ServerAPI, SubscribeMessage } from "@signalk/server-api";
-import { createLiveStream } from "../../src/streams/live.js";
+import { createLiveStream, selfContextOf } from "../../src/streams/live.js";
 import type { Config } from "../../src/config.js";
 import type { BathymetryData } from "../../src/types.js";
 
@@ -341,4 +341,11 @@ test("a configured path that no vessel publishes is not recorded", () => {
   const { app, subs } = fakeApp();
   createLiveStream(app, { ...config, path: "belowKeel" });
   expect(subs).toHaveLength(0);
+});
+
+test("selfContextOf falls back to the MMSI when there is no UUID", () => {
+  const app = {
+    getSelfPath: (path: string) => (path === "mmsi" ? "319280500" : undefined),
+  } as unknown as ServerAPI;
+  expect(selfContextOf(app)).toBe("vessels.urn:mrn:imo:mmsi:319280500");
 });

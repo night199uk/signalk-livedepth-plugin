@@ -35,6 +35,7 @@ import {
 } from "./tiles/api.js";
 import { registerPlotterExtension } from "./plotterext/provider.js";
 import { createCollector } from "./collector.js";
+import { selfContextOf } from "./streams/index.js";
 
 /** How a history rebuild ended. Only a completed or failed run consumes the
  * one-time `seed.run` trigger; an interrupted run leaves it set so the next
@@ -71,12 +72,6 @@ export function readVesselBeam(app: ServerAPI): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? value
     : undefined;
-}
-
-/** The server's own vessel context, matching `createLiveStream`'s. */
-function selfContextOf(app: ServerAPI): string {
-  const uuid = app.getSelfPath("uuid") as string | undefined;
-  return uuid ? `vessels.${uuid}` : "vessels.self";
 }
 
 /** The server's GNSS antenna correction mode; `off` unless configured. */
