@@ -4,6 +4,17 @@ All notable changes to this project are documented here, newest first. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.28] - 2026-11-07
+
+### Fixed
+
+- **Self is identified by UUID or MMSI.** A server with no UUID identifies its
+  own vessel by MMSI; the real history context is then
+  `vessels.urn:mrn:imo:mmsi:<mmsi>`, while `vessels.self` is only an alias.
+  The importer seeded both, duplicating self history and applying the hull
+  offset only to the alias copy. Self resolution now uses the UUID, falling
+  back to the MMSI, in both the live collector and the importer.
+
 ## [0.3.27] - 2026-11-07
 
 ### Added
